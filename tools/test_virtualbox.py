@@ -121,9 +121,12 @@ def boot(executable, iso, out, firmware, seconds):
     created, error, unavailable, shots = False, "", False, []
     started = time.monotonic(); deadline = started+seconds
     def seen(): return serial.read_text(errors="replace") if serial.exists() else ""
-    def wait(predicate):
+    def wait(predicate, stage):
         while time.monotonic()<deadline:
-            if predicate(seen()): return True
+            log = seen()
+            if re.search(r"K64 EXCEPTION|^SHZ-EXIT:[1-9][0-9]*\s*$|DOS-UEFI: FAILED|Reset after correcting the error\.", log, re.M):
+                raise RuntimeError("Guest failure during "+stage+":\n"+"\n".join(log.splitlines()[-6:]))
+            if predicate(log): return True
             if tool.state(vm) not in ("running","starting"): return predicate(seen())
             time.sleep(0.15)
         return predicate(seen())
@@ -136,18 +139,18 @@ def boot(executable, iso, out, firmware, seconds):
         tool.call("storageattach", vm, "--storagectl", "ISO-only-SATA", "--port", "0", "--device", "0", "--type", "dvddrive", "--medium", iso)
         tool.call("showvminfo", vm, "--machinereadable")
         tool.call("startvm", vm, "--type", "headless", timeout=30)
-        if not wait(lambda s: "SHZGUI INTERACTIVE ready" in s): raise RuntimeError("Guest did not reach the interactive GOP desktop before the deadline")
+        if not wait(lambda s: "SHZGUI INTERACTIVE ready" in s, "initial desktop boot"): raise RuntimeError("Guest did not reach the interactive GOP desktop before the deadline")
         # F8 is an OS validation request, never a firmware boot-selection key.
         before = len(seen()); tool.key(vm, 0x42)
-        if not wait(lambda s: "SHZ-NATIVE-ACCEPT: PASS failures=0" in s[before:]): raise RuntimeError("F8 native acceptance did not complete successfully")
+        if not wait(lambda s: "SHZ-NATIVE-ACCEPT: PASS failures=0" in s[before:], "F8 native acceptance"): raise RuntimeError("F8 native acceptance did not complete successfully")
         for name, scan, pane in (("desktop",0x3b,3),("video",0x3c,1),("music",0x3d,2),("thread-tree",0x3e,4),("utilities",0x3f,5)):
             baseline = max([int(n) for n in re.findall(r"SHZGUI PRESENT pane=\d+ seq=(\d+)", seen())] or [0])
             tool.key(vm, scan)
-            if not wait(lambda s: any(int(p)==pane and int(q)>baseline for p,q in re.findall(r"SHZGUI PRESENT pane=(\d+) seq=(\d+)",s))): raise RuntimeError("GUI pane presentation was not acknowledged: "+name)
+            if not wait(lambda s: any(int(p)==pane and int(q)>baseline for p,q in re.findall(r"SHZGUI PRESENT pane=(\d+) seq=(\d+)",s)), "presenting "+name): raise RuntimeError("GUI pane presentation was not acknowledged: "+name)
             picture = folder/(name+".png"); tool.call("controlvm", vm, "screenshotpng", picture)
             shots.append(png_info(picture))
         tool.key(vm,0x44)
-        if not wait(lambda s: bool(re.search(r"^SHZ-EXIT:0\s*$",s,re.M))): raise RuntimeError("F10 did not produce a successful guest exit")
+        if not wait(lambda s: bool(re.search(r"^SHZ-EXIT:0\s*$",s,re.M)), "F10 shutdown"): raise RuntimeError("F10 did not produce a successful guest exit")
     except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
         error = str(exc); unavailable = bool(CAPABILITY_ERRORS.search(error))
         if created:
@@ -177,6 +180,10 @@ def boot(executable, iso, out, firmware, seconds):
               check("All native mode and application checks pass after interactive F8", "SHZ-NATIVE-ACCEPT: PASS failures=0" in text),
               check("Six real/protected-mode applications succeed", "MODES: completed 6 native application(s), 0 failure(s)" in text),
               check("All 16 long-mode programs complete without failures", "DOS64: completed 16 application(s), 0 failure(s)" in text),
+              check("AMD/Intel demand-page return frame has valid ring-3 selectors",
+                    "K64 USER-PF: CS=23 SS=1b STAR_BASE=13 return frame PASS" in text),
+              check("CPU64 checks actual code/stack selectors after SYSCALL",
+                    "CPU64: post-SYSCALL CS=35 SS=27 PASS" in text),
               check("Compatibility SD64 applications also execute successfully", all(f"DOS64: {app}.SD64 exit=00000000 faulted=0 timeout=0 reaped=0" in text for app in ("HELLO64","MEM64"))),
               check("Actual long-mode thread ancestry, ownership, cancellation and joins pass", "THREAD64: real scheduled parent/child/grandchild, owner check, subtree cancellation + join PASS" in text),
               check("Native loader rejects malformed/dependent PE images", "NATIVE64: malformed-image/dependency rejection 6 checks, 0 failure(s)" in text),

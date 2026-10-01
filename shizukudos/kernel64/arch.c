@@ -74,11 +74,13 @@ void arch_init(void)
     load_gdt(&gdtr, 0x28);
     load_idt(&idtr);
 
-    /* SYSCALL: STAR[47:32] = kernel CS (0x08); STAR[63:48] = 0x10 so SYSRET yields SS = 0x18|3
-     * and CS = 0x20|3. SFMASK clears IF, DF, TF and AC on entry. EFER.SCE|NXE are enabled
+    /* SYSCALL: STAR[47:32] = kernel CS (0x08). SYSRET needs RPL 3 in STAR[63:48]:
+     * 0x13 yields SS = 0x1b and CS = 0x23 on AMD as well as Intel. AMD preserves the
+     * selector RPL; relying on Intel's implicit OR 3 leaves an invalid SS for IRETQ
+     * after the next user exception. SFMASK clears IF, DF, TF and AC on entry. EFER.SCE|NXE are enabled
      * through the Supervisor's validated WRMSR path. */
     wrmsr(MSR_EFER, rdmsr(MSR_EFER) | 1 | (1ull << 11));
-    wrmsr(MSR_STAR, (0x10ull << 48) | (0x08ull << 32));
+    wrmsr(MSR_STAR, (0x13ull << 48) | (0x08ull << 32));
     wrmsr(MSR_LSTAR, (uint64_t)syscall_entry);
     wrmsr(MSR_SFMASK, 0x40700);
     /* SSE for user threads: OSFXSR | OSXMMEXCPT, and clear CR0.EM / set MP. */
@@ -156,8 +158,18 @@ void isr_dispatch(struct regs *r)
         }
         {
             extern int user_page_fault(struct regs *r, uint64_t addr);
-            if ((r->cs & 3) && user_page_fault(r, addr))
+            if ((r->cs & 3) && user_page_fault(r, addr)) {
+#ifdef SHZ_STANDALONE
+                static unsigned reported_user_pf_frame;
+                if (!reported_user_pf_frame) {
+                    KASSERT(r->cs == 0x23 && r->ss == 0x1b);
+                    kprintf("K64 USER-PF: CS=%llx SS=%llx STAR_BASE=%llx return frame PASS\n",
+                            r->cs, r->ss, rdmsr(MSR_STAR) >> 48);
+                    reported_user_pf_frame = 1;
+                }
+#endif
                 return;
+            }
         }
     }
     if (r->cs & 3) {

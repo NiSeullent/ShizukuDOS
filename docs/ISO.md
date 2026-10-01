@@ -16,6 +16,9 @@ and reserves its own executable gateway and stack, exits boot services, checks
 the final firmware memory map, then reclaims permitted boot and kernel windows.
 It does not overwrite live firmware memory or execute a LoaderData allocation.
 Runtime, reserved, ACPI NVS and MMIO ranges remain excluded.
+The kernel also fixes the AMD SYSRET stack selector: the ring-3 bits are explicit
+in STAR rather than relying on Intel's behavior. This prevents MEM64's first
+demand-page fault from failing when IRETQ restores the user stack segment.
 
 The desktop opens before compatibility diagnostics. Press F8 to run all mode,
 native executable, API, graphics and media checks. Failures remain visible;

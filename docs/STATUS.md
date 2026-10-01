@@ -15,6 +15,10 @@ ring 3 with private address spaces; trusted 16/32-bit samples use a privileged,
 synchronous mode bridge with masked interrupts. The bridge is not a sandbox
 for arbitrary legacy software.
 
+The syscall return selectors include the explicit ring-3 bits required by AMD
+SYSRET. The first resolved user page fault verifies the saved CS/SS before
+IRETQ; this catches the AMD return-path error that Intel/QEMU previously masked.
+
 The BIOS path remains the original FAT12 shell and its DOS `.COM` examples.
 DOS compatibility is the documented INT 21h subset and supplied MZ16 programs,
 not every DOS application, extender or driver. Kernel32, the VMX Supervisor,

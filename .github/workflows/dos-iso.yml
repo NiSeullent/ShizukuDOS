@@ -27,7 +27,7 @@ jobs:
           gcc -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined samples/media/test_media.c shizukudos/kernel64/kurazy_media.c -o build/native/test_media
           build/native/test_media build/native/media
       - name: Boot actual ISO with BIOS and UEFI, no NIC
-        run: python3 tools/test_iso.py --qemu /usr/bin/qemu-system-x86_64
+        run: python3 tools/test_iso.py --qemu /usr/bin/qemu-system-x86_64 --require-audio
       - name: Verify native sample fault and timeout containment
         run: python3 samples/dos64/test_runtime.py --qemu /usr/bin/qemu-system-x86_64
       - name: Package source and native application release

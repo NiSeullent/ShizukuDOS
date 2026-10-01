@@ -24,7 +24,7 @@ xorriso and mtools. QEMU and OVMF are needed for acceptance. From the root:
 
 ```sh
 python3 -B tools/build_iso.py
-python3 -B tools/test_iso.py
+python3 -B tools/test_iso.py --require-audio
 python3 -B samples/dos64/test_runtime.py
 python3 -B tools/package_release.py --version 10.0.0
 ```
@@ -59,7 +59,9 @@ pairs are detected on RPM and Debian/Ubuntu installations; every test gets a
 fresh variables copy. `--layout-only` is explicitly layout-only evidence.
 Checks, guest logs, screenshots and optional PC-speaker WAV are saved under
 `build/iso-tests/`. Stock QEMU can record actual speaker output; builds without
-PC-speaker emulation report that fact in the test result.
+PC-speaker emulation report that fact in the test result. Release packaging
+requires a captured non-silent signal, so that condition cannot silently skip
+music verification in an official release.
 
 ## Desktop controls and scope
 

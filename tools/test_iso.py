@@ -204,7 +204,26 @@ def screenshot(qmp, path):
             "sha256": hashlib.sha256(rgb).hexdigest()}
 
 
-def uefi(qemu, iso, out, code, vars_path, timeout):
+def speaker_supported(qemu):
+    # pcspk-audiodev is a legacy machine option absent from some -machine help
+    # listings even when implemented. Probe actual option acceptance on a
+    # stopped, diskless, networkless machine, then destroy that probe immediately.
+    command = [str(qemu), "-machine", "pc,pcspk-audiodev=probe", "-audiodev", "none,id=probe",
+               "-accel", "tcg", "-S", "-display", "none", "-nodefaults", "-monitor", "none", "-serial", "none", "-nic", "none"]
+    probe = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        probe.communicate(timeout=1)
+        return False
+    except subprocess.TimeoutExpired:
+        return True
+    finally:
+        if probe.poll() is None:
+            probe.terminate()
+            try: probe.communicate(timeout=3)
+            except subprocess.TimeoutExpired: probe.kill(); probe.communicate(timeout=3)
+
+
+def uefi(qemu, iso, out, code, vars_path, timeout, require_audio=False):
     fresh_vars = out / "OVMF_VARS.fd"
     shutil.copyfile(vars_path, fresh_vars)
     serial_path = out / "uefi-serial.log"
@@ -215,8 +234,7 @@ def uefi(qemu, iso, out, code, vars_path, timeout):
     audio_path.unlink(missing_ok=True)
     # Some distribution builds omit PC speaker emulation. Record that explicitly;
     # stock QEMU also verifies the emitted signal rather than just speaker register writes.
-    machine_help = subprocess.run([str(qemu), "-machine", "pc,help"], capture_output=True, text=True, check=True)
-    speaker_available = "pcspk-audiodev" in machine_help.stdout
+    speaker_available = speaker_supported(qemu)
     command = base_command(qemu, iso)
     if speaker_available:
         command[command.index("pc")] = "pc,pcspk-audiodev=speaker"
@@ -335,6 +353,8 @@ def uefi(qemu, iso, out, code, vars_path, timeout):
         except (wave.Error, OSError) as exc:
             audio["error"] = str(exc)
         checks.append(check("music player emits a non-silent PC speaker signal", audio["signal_verified"], str(audio)))
+    elif require_audio:
+        checks.append(check("release requires actual PC speaker signal verification", False, str(audio)))
     return {"command": command, "checks": checks, "returncode": proc.returncode,
             "qemu_output": proc.stdout.read().decode(errors="replace"), "serial": "uefi-serial.log",
             "screenshots": shots, "audio": audio}
@@ -350,6 +370,7 @@ def main():
     p.add_argument("--timeout", type=int, default=180)
     p.add_argument("--out", type=Path, default=REPO / "build/iso-tests")
     p.add_argument("--layout-only", action="store_true")
+    p.add_argument("--require-audio", action="store_true", help="fail if an actual PC speaker signal cannot be captured")
     args = p.parse_args()
     if not args.iso.is_file(): p.error("ISO not found: " + str(args.iso))
     if not args.layout_only:
@@ -369,7 +390,7 @@ def main():
         print("Booting BIOS DOS16 from the actual ISO", flush=True)
         result["profiles"]["bios"] = bios(args.qemu, args.iso, args.out, args.timeout)
         print("Booting UEFI64 native DOS apps from the actual ISO", flush=True)
-        result["profiles"]["uefi"] = uefi(args.qemu, args.iso, args.out, args.ovmf_code, args.ovmf_vars, args.timeout)
+        result["profiles"]["uefi"] = uefi(args.qemu, args.iso, args.out, args.ovmf_code, args.ovmf_vars, args.timeout, args.require_audio)
     all_checks = result["layout"] + [c for profile in result["profiles"].values() for c in profile["checks"]]
     successful = all(c["status"] == "PASS" for c in all_checks)
     result["status"] = ("LAYOUT_ONLY" if args.layout_only else "PASS") if successful else "FAIL"

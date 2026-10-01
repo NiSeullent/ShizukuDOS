@@ -46,6 +46,7 @@ def main():
             or result.get("inputs_verified") is not True
             or set(profiles) != {"bios", "uefi"}
             or any(not profiles[name].get("checks") for name in ("bios", "uefi"))
+            or profiles.get("uefi", {}).get("audio", {}).get("signal_verified") is not True
             or not all(c.get("status") == "PASS" for c in profile_checks)):
         raise SystemExit("release refused: ISO acceptance did not pass for these exact ISO bytes")
     commit = git("rev-parse", "HEAD").decode().strip()

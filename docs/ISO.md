@@ -1,92 +1,100 @@
 # Independent DOS-only ISO
 
-ShizukuDOS has its own repository, source history and release track, copied
-from the DOS components of Windows 98 Shizuku Modern Edition. Builds read only
-this repository. The Windows 98 ShkSE ISO is a separate product.
+ShizukuDOS has its own source history and DOS-only release track. The Windows
+98 ShkSE source and ISO remain separate. Default builds use only this repository.
 
-| Firmware | Delivered path |
+| Boot path | Delivered behavior |
 | --- | --- |
-| BIOS | Original FAT12 Real Mode shell; `HELP`, `DIR`, `TYPE HELLO.TXT`, `EXEC DEMO.COM` |
-| x64 UEFI | Original EFI loader → Kernel64 → actual MZ16/PE32 mode examples → PE32+ utility suite → interactive ShizukuGUI |
+| BIOS optical | Original FAT12 Real Mode shell and COM examples |
+| IA32 UEFI optical | BOOTIA32.EFI enters the native x86-64 kernel on a capable CPU |
+| x64 UEFI optical | BOOTX64.EFI enters the same native kernel |
+| UEFI USB or disk | GPT exposes the embedded FAT32 EFI System Partition and both removable EFI entries |
 
-The EFI loader embeds the kernel and initial RAM archive, captures GOP, reserves
-its memory, and exits boot services using the final firmware memory map. The
-kernel owns the CPU tables and page tables from that point. The mode bridge
-temporarily leaves Long Mode, disables paging and either retains protected
-32-bit execution or clears CR0.PE for native Real Mode. It restores descriptors,
-paging, stack and interrupt state before returning to the desktop. No VMX,
-CSM, external bootloader or Windows runtime is required by this path.
+10.0.0 was tested as optical media only and omitted an IA32 EFI entry and disk
+partition metadata. 10.0.1 repairs those paths. The loader stages the payloads
+and reserves its own executable gateway and stack, exits boot services, checks
+the final firmware memory map, then reclaims permitted boot and kernel windows.
+It does not overwrite live firmware memory or execute a LoaderData allocation.
+Runtime, reserved, ACPI NVS and MMIO ranges remain excluded.
+
+The desktop opens before compatibility diagnostics. Press F8 to run all mode,
+native executable, API, graphics and media checks. Failures remain visible;
+F10 shuts down. ShizukuGUI uses the firmware GOP framebuffer directly.
+
+## VirtualBox 7.x
+
+Use an x86 virtual machine with Long Mode enabled, 256 MiB RAM, EFI firmware,
+a SATA/AHCI-attached DVD containing the ISO and Secure Boot disabled. Both
+EFI32 and EFI64 entry files are included; the native kernel still requires an
+x86-64 CPU. The memory plan requires at least 64 MiB of usable RAM after
+firmware reservations. 256 MiB avoids the ambiguity of a minimal DOS VM preset.
+
+The included isolated harness creates its own temporary VM configuration and
+runs without a NIC, hard disk, shared folders or Guest Additions:
+
+```sh
+python3 -B tools/test_virtualbox.py --iso build/shizukudos-10-dos-only.iso
+```
+
+It requires an already installed VirtualBox 7 with usable hardware
+virtualization. It does not install host modules or alter existing VMs. Host
+unavailability is recorded as UNAVAILABLE, never PASS. The dedicated GitHub
+workflow installs tools only on its disposable runner and tests EFI32 and
+EFI64 from the exact same ISO.
 
 ## Build and verify
 
-Install Python 3, NASM, GCC/binutils with freestanding x86 support, x64 MinGW,
-xorriso and mtools. QEMU and OVMF are needed for acceptance. From the root:
+Install Python 3, NASM, GCC/binutils, x64 and i686 MinGW, xorriso and mtools.
+QEMU plus matching x64 and IA32 OVMF firmware pairs are needed for acceptance.
+Ubuntu packages provide `ovmf` and `ovmf-ia32`.
 
 ```sh
 python3 -B tools/build_iso.py
 python3 -B tools/test_iso.py --require-audio
 python3 -B samples/dos64/test_runtime.py
-python3 -B tools/package_release.py --version 10.0.0
+python3 -B tools/package_release.py --version 10.0.1
 ```
 
-The builder compiles the standalone native kernel, fourteen PE32+ EXEs,
-`libkurazy64.a`, six MZ16/PE32 examples, the old SD64 samples and original media
-fixtures. It then builds the BIOS shell and EFI loader. Outputs remain under
-`build/`, including `shizukudos-10-dos-only.iso` and its SHA-256 sidecar.
-No source downloads or host boot changes are performed. A clean source commit
-is required for release packaging.
+The builder creates the standalone kernel, fourteen PE32+ EXEs, the static
+kurazy library, six MZ16/PE32 examples, original media and both EFI loaders.
+Outputs remain under ignored build directories. It fetches no source, changes
+no host boot settings and needs no Windows installation media.
 
-`--skip-build` assembles previously built artifacts only when build receipts
-match the current source and binaries. `--kernel`, `--initrd`, `--out` and
-`--cmdline` accept explicit paths. The default command line is
-`shz.dos64=1 shz.gui=1`; it runs startup diagnostics and stays in the desktop
-until F10. `shz.modes=1` is the bounded mode-only diagnostic path. The explicit
-`--allow-unverified-inputs` option marks exploratory builds unverified; the
-release packager rejects them. The full multi-kernel research build remains
-available through `python3 shizukudos/kbuild.py`.
+Release acceptance boots the exact ISO as BIOS optical, x64 optical, raw USB,
+AHCI disk, q35 SATA DVD, IA32 optical and an x64 guest without a serial port.
+It checks GPT and FAT32, both PE EFI architectures, source/payload hashes,
+actual CPU registers, all supplied programs, malformed inputs, actual
+thread-tree operations, GOP readback, HTTP/TCP, keyboard navigation and
+recorded non-silent PC-speaker audio. The desktop must become interactive
+before F8 diagnostics. Every guest has a fresh variables image and no NIC or
+host disk. Evidence includes logs, screenshots, audio and result JSON.
 
-The test extracts the actual ISO, validates the boot catalog and exact file
-hashes, and checks the corresponding source archive. It boots one isolated
-guest at a time with no NIC or host disks. The BIOS check uses the shell and
-COM16 program. The UEFI check requires six legacy examples, all fourteen native
-EXEs, the old arithmetic/memory checks, negative loader/API checks, actual
-thread-tree operations, GOP framebuffer readback and media/browser tests. It
-injects keyboard input through a local QEMU control socket, captures the five
-panes and a followed HTML page, then shuts down through F10.
+`--ovmf-code`, `--ovmf-vars`, `--ovmf-ia32-code` and `--ovmf-ia32-vars` override
+firmware paths. `--profile` selects a focused regression; release packaging
+requires every profile. `--layout-only` proves only the layout. A clean source
+commit and exact tested bytes are required for packaging.
 
-`--ovmf-code` and `--ovmf-vars` override local firmware paths. Matching firmware
-pairs are detected on RPM and Debian/Ubuntu installations; every test gets a
-fresh variables copy. `--layout-only` is explicitly layout-only evidence.
-Checks, guest logs, screenshots and optional PC-speaker WAV are saved under
-`build/iso-tests/`. Stock QEMU can record actual speaker output; builds without
-PC-speaker emulation report that fact in the test result. Release packaging
-requires a captured non-silent signal, so that condition cannot silently skip
-music verification in an official release.
+`--skip-build` accepts only matching source/binary receipts. Explicit kernel,
+initrd, output and command-line paths are supported. Exploratory
+`--allow-unverified-inputs` images cannot be packaged as official releases.
+The full multi-kernel research build remains separately available.
 
-## Desktop controls and scope
+## Desktop and scope
 
-F1 browser, F2 video, F3 music, F4 thread tree, F5 utilities, F6 browser address,
-F10 shutdown. Space pauses/resumes video/music; Tab/Enter selects and opens;
-Backspace follows browser history; arrows scroll. Keyboard support currently
-requires PS/2/i8042 or firmware emulation. All graphics use GOP only.
+F1 browser, F2 video, F3 music, F4 thread tree, F5 utilities, F6 URL input,
+F8 diagnostics and F10 shutdown. Space pauses/resumes players; Tab/Enter
+selects/opens; Backspace returns through browser history; arrows scroll.
+Keyboard input requires PS/2 or firmware emulation. All graphics use GOP.
 
-The browser supports its documented HTML subset and bounded HTTP/1.0 to
-numeric IPv4 addresses. It needs an available supported network interface for
-remote requests; the acceptance transaction uses native loopback without a
-NIC. The video and music formats are intentionally small and source-contained.
-See [media/browser details](../samples/media/README.md) and
-[kurazy](../sdk/kurazy/SPEC.md).
+The original browser supports bounded HTML and HTTP/1.0 to numeric IPv4 hosts.
+External requests need a supported network interface; isolated acceptance uses
+actual native TCP loopback. Video uses KV64 RGB frame animation; music uses
+KM64 PC-speaker scores. DOS compatibility covers the documented INT21 subset
+and trusted examples. See [media contracts](../samples/media/README.md),
+[kurazy](../sdk/kurazy/SPEC.md) and [release scope](STATUS.md).
 
-## Distribution
-
-`SAMPLES/` contains twenty EXEs, two legacy SD64 programs and the exact initial
-RAM archive. `SOURCE/` contains the complete corresponding source, GPLv2 and
-third-party notices. `MANIFEST.json` records both profiles and every payload
-hash. Release assets include the ISO, source archive, native apps/static SDK,
-boot evidence, release manifest and SHA256SUMS.
-
-Firmware must accept the unsigned EFI application and provide a 32-bit GOP
-framebuffer. Fixed allocations include boot pages at 0x1000, the mode bridge at
-0x10000..0x6ffff, kernel memory at 1 MiB and archive at 32 MiB. Unavailable ranges
-are rejected instead of overwritten. This acceptance scope does not certify
-physical hardware or general DOS/Windows binary compatibility.
+SAMPLES contains twenty EXEs, two SD64 programs and the exact executed archive.
+SOURCE contains complete corresponding source and license notices. Release
+assets include the ISO, source archive, apps/static SDK, evidence, manifest and
+SHA256SUMS. Physical-machine certification and Secure Boot signing are not
+claimed by these virtual-machine checks.

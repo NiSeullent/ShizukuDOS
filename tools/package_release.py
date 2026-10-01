@@ -30,7 +30,7 @@ def git(*args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--version", default="10.0.0")
+    ap.add_argument("--version", default="10.0.1")
     ap.add_argument("--out", type=Path, default=ROOT / "build" / "releases")
     args = ap.parse_args()
     if not re.fullmatch(r"[0-9][0-9A-Za-z.-]*", args.version):
@@ -41,12 +41,13 @@ def main():
     result_path = ROOT / "build" / "iso-tests" / "result.json"
     result = json.loads(result_path.read_text())
     profiles = result.get("profiles", {})
-    profile_checks = [c for name in ("bios", "uefi") for c in profiles.get(name, {}).get("checks", [])]
+    required_profiles = {"bios", "uefi", "uefi-usb", "uefi-disk", "uefi-sata", "uefi-ia32", "uefi-no-uart"}
+    profile_checks = [c for name in required_profiles for c in profiles.get(name, {}).get("checks", [])]
     if (result.get("status") != "PASS" or result.get("iso_sha256") != digest(iso)
             or result.get("inputs_verified") is not True
-            or set(profiles) != {"bios", "uefi"}
-            or any(not profiles[name].get("checks") for name in ("bios", "uefi"))
-            or profiles.get("uefi", {}).get("audio", {}).get("signal_verified") is not True
+            or set(profiles) != required_profiles
+            or any(not profiles[name].get("checks") for name in required_profiles)
+            or any(profiles[name].get("audio", {}).get("signal_verified") is not True for name in required_profiles if name != "bios")
             or not all(c.get("status") == "PASS" for c in profile_checks)):
         raise SystemExit("release refused: ISO acceptance did not pass for these exact ISO bytes")
     commit = git("rev-parse", "HEAD").decode().strip()

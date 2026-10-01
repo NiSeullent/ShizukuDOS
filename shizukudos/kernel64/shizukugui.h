@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 #ifndef SHIZUKUGUI_H
 #define SHIZUKUGUI_H
-/* A GOP-only desktop. Normal run returns when the user presses F10. */
+/* A GOP-only desktop. F8 runs full native acceptance; F10 returns for shutdown. */
 int shizukugui_init(void);
 int shizukugui_selftest(void);
 void shizukugui_run(void);

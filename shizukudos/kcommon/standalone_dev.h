@@ -9,21 +9,37 @@
 #include "../abi/shz_abi.h"
 
 #define SA_COM1 0x3f8
+#ifdef SHZ_STANDALONE_IO_TEST
+void sa_outb(uint16_t p, uint8_t v);
+uint8_t sa_inb(uint16_t p);
+#else
 static inline void sa_outb(uint16_t p, uint8_t v) { __asm__ volatile("outb %0, %1" : : "a"(v), "Nd"(p)); }
 static inline uint8_t sa_inb(uint16_t p) { uint8_t v; __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"(p)); return v; }
+#endif
 
+/* 0 = unprobed, 1 = usable, -1 = absent/stalled. A missing COM1 must never
+ * turn every log byte into a million-port-read boot delay. Port E9 is an
+ * optional emulator debug console; on hardware with no device it is ignored. */
 static int sa_serial_ready;
+#define SA_SERIAL_POLL_LIMIT 8192u
 static inline void sa_serial_putc(char c)
 {
     unsigned spin = 0;
+    uint8_t status;
+    sa_outb(0xe9, (uint8_t)c);
+    if (sa_serial_ready < 0) return;
     if (!sa_serial_ready) {
+        if (sa_inb(SA_COM1 + 5) == 0xff) { sa_serial_ready = -1; return; }
         sa_outb(SA_COM1 + 1, 0x00); sa_outb(SA_COM1 + 3, 0x80); sa_outb(SA_COM1 + 0, 0x01); sa_outb(SA_COM1 + 1, 0x00);
         sa_outb(SA_COM1 + 3, 0x03); sa_outb(SA_COM1 + 2, 0xc7); sa_outb(SA_COM1 + 4, 0x03);
+        if (sa_inb(SA_COM1 + 3) != 0x03) { sa_serial_ready = -1; return; }
         sa_serial_ready = 1;
     }
-    while (!(sa_inb(SA_COM1 + 5) & 0x20) && ++spin < 1000000u)
-        ;
-    sa_outb(SA_COM1, (uint8_t)c);
+    do {
+        status = sa_inb(SA_COM1 + 5);
+        if (status != 0xff && (status & 0x20)) { sa_outb(SA_COM1, (uint8_t)c); return; }
+    } while (status != 0xff && ++spin < SA_SERIAL_POLL_LIMIT);
+    sa_serial_ready = -1;
 }
 static inline void sa_serial_puts(const char *s) { while (*s) sa_serial_putc(*s++); }
 static inline void sa_serial_hex(uint64_t v)

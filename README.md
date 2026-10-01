@@ -28,17 +28,19 @@ upstream commit and copied file hashes.
 python3 -B shizukudos/tools/shz.py doctor
 python3 -B shizukudos/tools/shz.py build --profile dos-only
 python3 -B shizukudos/tools/shz.py test --suite iso
-python3 -B shizukudos/tools/shz.py package --version 10.0.0
+python3 -B shizukudos/tools/shz.py package --version 10.0.1
 ```
 
-The default build uses installed NASM, GCC/binutils, x64 MinGW, mtools, and
+The default build uses installed NASM, GCC/binutils, x64/i686 MinGW, mtools, and
 xorriso. It writes generated artifacts under `build/`, fetches no upstream
 source, and changes no host boot or client configuration. QEMU and OVMF are
 needed for the boot checks. See [ISO instructions](docs/ISO.md).
 
-The ISO boots the original 16-bit FAT12 shell on BIOS. On x64 UEFI it starts
-Kernel64, executes actual Real Mode and Protected Mode examples, returns to
-Long Mode, runs fourteen native PE32+ utilities, and opens **ShizukuGUI**.
+The ISO boots the original 16-bit FAT12 shell on BIOS. IA32 and x64 UEFI
+entry points start the same native x86-64 Kernel64 and open **ShizukuGUI**.
+Press **F8** to execute the actual Real Mode and Protected Mode examples,
+return to Long Mode, and run fourteen native PE32+ utilities. The desktop
+starts before those diagnostics; firmware boot does not depend on running them.
 The desktop writes 32-bit truecolor pixels directly to the GOP framebuffer.
 Its video, music and browser services have separate scheduled workers beneath
 the desktop in an inspectable **thread tree**.
@@ -61,7 +63,9 @@ bootloader, complete source, static SDK, sample programs and generated media.
 | CSMWrap | Optional external firmware bridge, with its own source pins and licenses. Excluded from the default ISO. |
 | Legacy Windows integration | Source lineage and shared experimental contracts remain available. This DOS release does not install, boot, or replace the Windows 98 DOS core. |
 
-Version **10.0.0** is the regular release of this scoped native desktop track.
+Version **10.0.1** repairs the EFI entry points and boot-media layout of the
+regular native desktop track. The ISO exposes a FAT32 EFI System Partition
+through GPT as well as its optical boot catalog.
 The architecture remains experimental. Native 16/32-bit launches are trusted,
 synchronous compatibility demonstrations; they are not sandboxed legacy
 processes. DOS API coverage and hardware support have explicit bounds in the
@@ -87,7 +91,12 @@ These deliberately small formats keep every decoder and fixture in the source
 tree. See [media formats and browser scope](samples/media/README.md).
 
 Use **F1** browser, **F2** video, **F3** music, **F4** thread tree, **F5** utilities,
-**Space** pause/resume, **Tab/Enter** select/open and **F10** shutdown.
+**Space** pause/resume, **Tab/Enter** select/open, **F8** diagnostics and **F10** shutdown.
+
+For VirtualBox 7.x, use an x86 VM with Long Mode available, 256 MiB RAM, EFI
+firmware, a SATA-attached virtual DVD and Secure Boot disabled.
+The image includes both `BOOTIA32.EFI` and `BOOTX64.EFI`. Secure Boot signing
+is not supplied. See [boot and verification instructions](docs/ISO.md).
 
 ## Why does this exist?
 

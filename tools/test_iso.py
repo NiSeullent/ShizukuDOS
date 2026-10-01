@@ -15,6 +15,7 @@ import sys
 import tarfile
 import threading
 import time
+import uuid
 import wave
 import zlib
 from pathlib import Path
@@ -28,6 +29,57 @@ def firmware_pair():
         if code.is_file() and variables.is_file():
             return code, variables
     return Path("/usr/share/edk2/ovmf/OVMF_CODE.fd"), Path("/usr/share/edk2/ovmf/OVMF_VARS.fd")
+
+
+def ia32_firmware_pair():
+    for directory in ("/usr/share/OVMF", "/usr/share/edk2/ovmf-ia32", "/usr/share/edk2/ovmf"):
+        for prefix in ("OVMF32", "OVMF"):
+            for suffix in ("_4M", ""):
+                code = Path(directory) / f"{prefix}_CODE{suffix}.fd"
+                variables = Path(directory) / f"{prefix}_VARS{suffix}.fd"
+                if code.is_file() and variables.is_file() and (prefix == "OVMF32" or "ia32" in directory):
+                    return code, variables
+    return Path("/usr/share/OVMF/OVMF32_CODE_4M.fd"), Path("/usr/share/OVMF/OVMF32_VARS_4M.fd")
+
+
+def gpt_esp_checks(iso, efi_files):
+    """Independently inspect the actual USB/disk partition table and FAT32 ESP."""
+    data = iso.read_bytes()
+    checks = []
+    protective = len(data) >= 1024 and data[510:512] == b"\x55\xaa" and any(data[446 + n * 16 + 4] == 0xee for n in range(4))
+    checks.append(check("hybrid ISO has a protective MBR for UEFI USB/disk discovery", protective))
+    if not protective or data[512:520] != b"EFI PART":
+        checks.append(check("hybrid ISO contains a GPT header", False))
+        return checks
+    header_size, checksum = struct.unpack_from("<II", data, 524)
+    if not 92 <= header_size <= 512:
+        return checks + [check("GPT header has a valid size", False)]
+    header = bytearray(data[512:512 + header_size]); header[16:20] = b"\0" * 4
+    checks.append(check("GPT header CRC matches the actual ISO bytes", zlib.crc32(header) & 0xffffffff == checksum))
+    table_lba, count, stride, table_crc = struct.unpack_from("<QIII", data, 584)
+    if not count or count > 4096 or stride < 128 or stride > 4096 or table_lba * 512 + count * stride > len(data):
+        return checks + [check("GPT partition entries fit within the ISO", False)]
+    table = data[table_lba * 512:table_lba * 512 + count * stride]
+    checks.append(check("GPT partition table CRC matches the actual ISO bytes", zlib.crc32(table) & 0xffffffff == table_crc))
+    esp_type = uuid.UUID("c12a7328-f81f-11d2-ba4b-00a0c93ec93b").bytes_le
+    entries = [table[i * stride:(i + 1) * stride] for i in range(count)]
+    esp = [e for e in entries if e[:16] == esp_type]
+    checks.append(check("hybrid ISO exposes exactly one EFI System Partition", len(esp) == 1))
+    if len(esp) != 1:
+        return checks
+    first, last = struct.unpack_from("<QQ", esp[0], 32)
+    start, stop = first * 512, (last + 1) * 512
+    valid = first > 1 and last >= first and stop <= len(data)
+    checks.append(check("EFI System Partition lies completely inside the distributed ISO", valid))
+    if not valid:
+        return checks
+    fat = data[start:stop]
+    checks.append(check("EFI System Partition has a FAT32 boot sector", fat[510:512] == b"\x55\xaa" and fat[82:90] == b"FAT32   "
+                        and struct.unpack_from("<H", fat, 17)[0] == 0 and struct.unpack_from("<I", fat, 36)[0] > 0))
+    for name, expected in efi_files.items():
+        result = subprocess.run(["mtype", "-i", str(iso) + "@@" + str(start), "::/EFI/BOOT/" + name], capture_output=True)
+        checks.append(check("disk ESP contains the exact tested EFI image: " + name, result.returncode == 0 and result.stdout == expected))
+    return checks
 
 
 def check(name, ok, detail=""):
@@ -68,6 +120,18 @@ def layout(iso, out):
     subprocess.run(["xorriso", "-osirrox", "on", "-indev", str(iso), "-extract", "/", str(extract)],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
     manifest = json.loads((extract / "MANIFEST.json").read_text())
+    efi_files = {}
+    for name, machine, magic in (("BOOTX64.EFI", 0x8664, 0x20b), ("BOOTIA32.EFI", 0x14c, 0x10b)):
+        path = extract / "EFI/BOOT" / name
+        valid = False
+        if path.is_file():
+            data = path.read_bytes(); efi_files[name] = data
+            if len(data) >= 64 and data[:2] == b"MZ":
+                pe = struct.unpack_from("<I", data, 60)[0]
+                valid = pe + 94 <= len(data) and data[pe:pe + 4] == b"PE\0\0" and struct.unpack_from("<H", data, pe + 4)[0] == machine
+                valid = valid and struct.unpack_from("<H", data, pe + 24)[0] == magic and struct.unpack_from("<H", data, pe + 24 + 68)[0] == 10
+        checks.append(check("ISO supplies a genuine EFI entry for firmware architecture: " + name, valid))
+    checks.extend(gpt_esp_checks(iso, efi_files))
     actual_files = {str(path.relative_to(extract)) for path in extract.rglob("*") if path.is_file()}
     expected_files = set(manifest["files"]) | {"MANIFEST.json", "BOOT/BOOT.CAT"}
     checks.append(check("ISO file set matches its manifest exactly", actual_files == expected_files,
@@ -96,9 +160,21 @@ def layout(iso, out):
     return checks, manifest
 
 
-def base_command(qemu, iso):
-    return [str(qemu), "-machine", "pc", "-accel", "tcg", "-cpu", "max", "-m", "256", "-cdrom", str(iso),
-            "-boot", "d", "-display", "none", "-monitor", "none", "-nic", "none", "-no-reboot"]
+def base_command(qemu, iso, media="optical", machine="pc", ram=256):
+    command = [str(qemu), "-machine", machine, "-accel", "tcg", "-cpu", "max", "-m", str(ram),
+               "-display", "none", "-monitor", "none", "-nic", "none", "-no-reboot"]
+    if media == "optical":
+        command += ["-cdrom", str(iso), "-boot", "d"]
+    elif media == "usb":
+        command += ["-device", "qemu-xhci,id=boot-usb", "-drive", f"if=none,format=raw,readonly=on,file={iso},id=boot-media",
+                    "-device", "usb-storage,drive=boot-media,bootindex=1"]
+    elif media in ("sata-optical", "disk"):
+        command += ["-device", "ich9-ahci,id=boot-sata", "-drive",
+                    f"if=none,format=raw,readonly=on,file={iso},id=boot-media" + (",media=cdrom" if media == "sata-optical" else ""),
+                    "-device", ("ide-cd" if media == "sata-optical" else "ide-hd") + ",drive=boot-media,bus=boot-sata.0,bootindex=1"]
+    else:
+        raise ValueError("unknown boot media: " + media)
+    return command
 
 
 def bios(qemu, iso, out, timeout):
@@ -223,7 +299,7 @@ def speaker_supported(qemu):
             except subprocess.TimeoutExpired: probe.kill(); probe.communicate(timeout=3)
 
 
-def uefi(qemu, iso, out, code, vars_path, timeout, require_audio=False):
+def uefi(qemu, iso, out, code, vars_path, timeout, require_audio=False, media="optical", machine="pc", ram=256, uart=True, manifest_path=None):
     fresh_vars = out / "OVMF_VARS.fd"
     shutil.copyfile(vars_path, fresh_vars)
     serial_path = out / "uefi-serial.log"
@@ -235,14 +311,18 @@ def uefi(qemu, iso, out, code, vars_path, timeout, require_audio=False):
     # Some distribution builds omit PC speaker emulation. Record that explicitly;
     # stock QEMU also verifies the emitted signal rather than just speaker register writes.
     speaker_available = speaker_supported(qemu)
-    command = base_command(qemu, iso)
+    command = base_command(qemu, iso, media, machine, ram)
     if speaker_available:
-        command[command.index("pc")] = "pc,pcspk-audiodev=speaker"
+        command[command.index(machine)] = machine + ",pcspk-audiodev=speaker"
         command += ["-audiodev", f"wav,id=speaker,path={audio_path}"]
     command += ["-qmp", f"unix:{qmp_path},server=on,wait=off",
               "-drive", f"if=pflash,format=raw,unit=0,readonly=on,file={code}",
-              "-drive", f"if=pflash,format=raw,unit=1,file={fresh_vars}", "-serial", f"file:{serial_path}",
+              "-drive", f"if=pflash,format=raw,unit=1,file={fresh_vars}",
               "-device", "isa-debug-exit,iobase=0xf4,iosize=0x04"]
+    if uart:
+        command += ["-serial", f"file:{serial_path}"]
+    else:
+        command += ["-serial", "none", "-debugcon", f"file:{serial_path}", "-global", "isa-debugcon.iobase=0xe9"]
     proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     timed_out, control_error = False, ""
     shots, qmp = [], None
@@ -268,6 +348,13 @@ def uefi(qemu, iso, out, code, vars_path, timeout, require_audio=False):
         while proc.poll() is None and time.monotonic() < deadline:
             if "SHZGUI INTERACTIVE ready" in seen():
                 qmp = QMP(qmp_path)
+                offset = len(seen())
+                qmp.key("f8")
+                while proc.poll() is None and time.monotonic() < deadline and "SHZ-NATIVE-ACCEPT:" not in seen()[offset:]:
+                    time.sleep(0.05)
+                if "SHZ-NATIVE-ACCEPT: PASS failures=0" not in seen()[offset:]:
+                    raise RuntimeError("F8 acceptance did not finish successfully after the interactive desktop booted")
+                wait_frame("f1", 3)
                 shots.append(screenshot(qmp, out / "desktop.png"))
                 for name, key, pane in (("browser", "f1", 3), ("video", "f2", 1), ("music", "f3", 2), ("thread-tree", "f4", 4), ("utilities", "f5", 5)):
                     wait_frame(key, pane)
@@ -329,7 +416,7 @@ def uefi(qemu, iso, out, code, vars_path, timeout, require_audio=False):
               check("keyboard selects visibly different windows", len({s["sha256"] for s in shots[1:6]}) == 5),
               check("guest exits successfully within deadline", not timed_out and bool(re.search(r"^SHZ-EXIT:0\s*$", serial, re.M)) and proc.returncode == 1,
                     f"qemu_rc={proc.returncode}, timeout={timed_out}")]
-    manifest = json.loads((out / "extracted/MANIFEST.json").read_text())
+    manifest = json.loads((manifest_path or out / "extracted/MANIFEST.json").read_text())
     native_exes = sorted(Path(name).name for name in manifest["files"] if name.startswith("SAMPLES/") and name.endswith("64.EXE"))
     checks.append(check("ISO ships at least ten real native 64-bit EXEs", len(native_exes) >= 10, str(native_exes)))
     for name in native_exes:
@@ -371,11 +458,19 @@ def main():
     p.add_argument("--out", type=Path, default=REPO / "build/iso-tests")
     p.add_argument("--layout-only", action="store_true")
     p.add_argument("--require-audio", action="store_true", help="fail if an actual PC speaker signal cannot be captured")
+    default_ia32_code, default_ia32_vars = ia32_firmware_pair()
+    p.add_argument("--ovmf-ia32-code", type=Path, default=default_ia32_code)
+    p.add_argument("--ovmf-ia32-vars", type=Path, default=default_ia32_vars)
+    names = ("bios", "uefi", "uefi-usb", "uefi-disk", "uefi-sata", "uefi-ia32", "uefi-no-uart")
+    p.add_argument("--profile", choices=("all", *names), default="all", help="focused boot regression; releases require all profiles")
     args = p.parse_args()
     if not args.iso.is_file(): p.error("ISO not found: " + str(args.iso))
     if not args.layout_only:
         for path in (args.qemu, args.ovmf_code, args.ovmf_vars):
             if not path.is_file(): p.error("test dependency not found: " + str(path))
+        if args.profile in ("all", "uefi-ia32"):
+            for path in (args.ovmf_ia32_code, args.ovmf_ia32_vars):
+                if not path.is_file(): p.error("IA32 firmware dependency not found: " + str(path))
     args.out.mkdir(parents=True, exist_ok=True)
     layout_checks, manifest = layout(args.iso, args.out)
     result = {"iso": str(args.iso), "iso_sha256": hashlib.sha256(args.iso.read_bytes()).hexdigest(),
@@ -387,10 +482,27 @@ def main():
               "layout": layout_checks, "profiles": {}}
     if not args.layout_only:
         # A single guest at a time; no NIC, host disk, USB passthrough or installed OS.
-        print("Booting BIOS DOS16 from the actual ISO", flush=True)
-        result["profiles"]["bios"] = bios(args.qemu, args.iso, args.out, args.timeout)
-        print("Booting UEFI64 native DOS apps from the actual ISO", flush=True)
-        result["profiles"]["uefi"] = uefi(args.qemu, args.iso, args.out, args.ovmf_code, args.ovmf_vars, args.timeout, args.require_audio)
+        selected = names if args.profile == "all" else (args.profile,)
+        for name in selected:
+            print("Booting " + name + " from the exact distributed ISO", flush=True)
+            destination = args.out if name in ("bios", "uefi") else args.out / name
+            destination.mkdir(parents=True, exist_ok=True)
+            if name == "bios":
+                result["profiles"][name] = bios(args.qemu, args.iso, destination, args.timeout)
+                continue
+            options = {"manifest_path": args.out / "extracted/MANIFEST.json"}
+            code, variables = args.ovmf_code, args.ovmf_vars
+            if name == "uefi-usb": options["media"] = "usb"
+            elif name == "uefi-disk": options["media"] = "disk"
+            elif name == "uefi-sata": options.update(media="sata-optical", machine="q35")
+            elif name == "uefi-no-uart": options["uart"] = False
+            elif name == "uefi-ia32": code, variables = args.ovmf_ia32_code, args.ovmf_ia32_vars
+            profile = uefi(args.qemu, args.iso, destination, code, variables, args.timeout, args.require_audio, **options)
+            profile["boot_media"] = options.get("media", "optical")
+            profile["firmware_architecture"] = "IA32" if name == "uefi-ia32" else "X64"
+            profile["firmware_sha256"] = hashlib.sha256(code.read_bytes()).hexdigest()
+            profile["evidence_directory"] = str(destination.relative_to(args.out))
+            result["profiles"][name] = profile
     all_checks = result["layout"] + [c for profile in result["profiles"].values() for c in profile["checks"]]
     successful = all(c["status"] == "PASS" for c in all_checks)
     result["status"] = ("LAYOUT_ONLY" if args.layout_only else "PASS") if successful else "FAIL"

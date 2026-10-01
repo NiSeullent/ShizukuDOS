@@ -12,6 +12,7 @@
 #include "dos64.h"
 #include "net.h"
 #include "kurazy.h"
+#include "boot_console.h"
 
 #define BG 0x0b2028u
 #define PANEL 0x142e39u
@@ -45,6 +46,7 @@ static desktop_t g;
 
 /* The native runtime supplies this callback; panes never invoke it recursively. */
 extern int dos64_launch_named(const char *name);
+extern unsigned shizukudos_acceptance_run(void);
 
 static const char *apps[] = {
     "HELLO64.EXE", "MEM64.EXE", "CPU64.EXE", "TREE64.EXE", "DIR64.EXE",
@@ -258,7 +260,7 @@ static void render(void)
     if (g.focus == 5) render_launcher();
     fill(0, (int)g.height - 40, (int)g.width, 40, 0x173b43);
     text(18, (int)g.height - 27, "F1 Web  F2 Video  F3 Music  F4 Tree  F5 Apps", TEAL);
-    text((int)g.width - 154, (int)g.height - 27, "F10: shutdown", MUTED);
+    text((int)g.width - 250, (int)g.height - 27, "F8: tests  F10: shutdown", MUTED);
     g.dirty = 0;
     present();
     rendered_pane = g.focus; rendered_seq = ++g.render_seq;
@@ -440,9 +442,12 @@ static int browser_wait(unsigned id)
 }
 static void key(unsigned key)
 {
-    char path[160]; const char *launch = 0; int navigate = 0;
+    char path[160]; const char *launch = 0; int navigate = 0, acceptance = 0;
     mutex_lock(&g.lock);
-    if (g.address_edit) {
+    if (key == 0x42) {
+        acceptance = 1; g.address_edit = 0;
+        strcopy(g.message, "Running full CPU-mode, native application and media acceptance tests...", sizeof g.message);
+    } else if (g.address_edit) {
         if (key == 0x01) g.address_edit = 0;
         else if (key == 0x0e) { size_t len = strlen(g.address); if (len) g.address[len - 1] = 0; }
         else if (key == 0x1c) { strcopy(path, g.address, sizeof path); navigate = 2; g.address_edit = 0; }
@@ -477,6 +482,16 @@ static void key(unsigned key)
     }
     g.dirty = 1;
     mutex_unlock(&g.lock);
+    if (acceptance) {
+        unsigned failed;
+        render();
+        failed = shizukudos_acceptance_run();
+        mutex_lock(&g.lock);
+        strcopy(g.message, failed ? "Acceptance tests FAILED. See the diagnostic log." : "Acceptance tests PASSED: CPU modes, native EXEs, GOP, media and HTTP.", sizeof g.message);
+        g.dirty = 1; mutex_unlock(&g.lock);
+        render();
+        kprintf("SHZGUI ACCEPTANCE COMPLETE result=%s\n", failed ? "FAIL" : "PASS");
+    }
     if (navigate) browser_request(path, navigate == 2);
     if (launch) {
         int result = dos64_launch_named(launch);
@@ -493,20 +508,23 @@ static int controller_ready(void)
 {
     unsigned i; for (i = 0; i < 100000; ++i) if (!(k_inb(0x64) & 2)) return 0; return -1;
 }
-static void keyboard_init(void)
+static int keyboard_init(void)
 {
     unsigned i; uint8_t config = 0x40;
+    if (k_inb(0x64) == 0xff) return -1;
     for (i = 0; i < 64 && (k_inb(0x64) & 1); ++i) (void)k_inb(0x60);
-    if (controller_ready()) return;
+    if (controller_ready()) return -1;
     k_outb(0x64, 0x20);
     for (i = 0; i < 100000; ++i) if (k_inb(0x64) & 1) { config = k_inb(0x60); break; }
+    if (i == 100000) return -1;
     config = (uint8_t)((config | 0x40) & ~0x11u); /* translation; no IRQ1; keyboard clock on */
-    if (controller_ready()) return;
+    if (controller_ready()) return -1;
     k_outb(0x64, 0x60);
-    if (controller_ready()) return;
+    if (controller_ready()) return -1;
     k_outb(0x60, config);
-    if (controller_ready()) return;
+    if (controller_ready()) return -1;
     k_outb(0x64, 0xae);
+    return 0;
 }
 static void poll_keyboard(void)
 {
@@ -552,7 +570,7 @@ int shizukugui_init(void)
     if (k64_boot_framebuffer(&fb) || fb.width < 640 || fb.height < 480 || fb.width > 4096 || fb.height > 4096) {
         kprintf("SHZGUI unavailable: a 640x480..4096x4096 32-bit GOP framebuffer is required\n"); return -1;
     }
-    g.front = mmio_map(fb.base, (uint64_t)fb.pitch * fb.height);
+    g.front = k64_boot_framebuffer_map();
     g.back = gfx_pages_alloc((uint64_t)fb.width * fb.height * 4);
     if (!g.front || !g.back) return -1;
     g.width = fb.width; g.height = fb.height; g.pitch = fb.pitch / 4; g.rgbx = fb.format == SHZ_FB_RGBX8888;
@@ -566,7 +584,18 @@ int shizukugui_init(void)
     if (!bytes || kz_video_parse(&g.video, bytes, (size_t)n)) { g.failed = 1; kprintf("SHZGUI video fixture rejected\n"); }
     bytes = read_fixture("C:\\MEDIA\\DEMO.KM64", &n);
     if (!bytes || kz_music_parse(&g.music, bytes, (size_t)n)) { g.failed = 1; kprintf("SHZGUI music fixture rejected\n"); }
+    /* The initial local page needs no browser-worker round trip. Draw before
+     * creating workers or waiting on keyboard/controller state. */
+    bytes = read_fixture("C:\\WWW\\INDEX.HTM", &n);
+    if (!bytes || kz_html_parse(&g.page, bytes, (size_t)n)) {
+        g.failed = 1; strcopy(g.message, "Initial HTML document is missing or invalid.", sizeof g.message);
+    } else {
+        strcopy(g.url, "C:\\WWW\\INDEX.HTM", sizeof g.url);
+        strcopy(g.message, "F8 runs the full native acceptance suite. F6 edits a URL.", sizeof g.message);
+    }
     g.video_epoch = ticks_now(); g.video_playing = !!g.video.pixels;
+    k64_boot_console_enable(0);
+    render();
     g.video_thread = thread_create("gui.video", video_worker, 0);
     g.music_thread = thread_create("gui.music", music_worker, 0);
     g.browser_thread = thread_create("gui.browser", browser_worker, 0);
@@ -577,8 +606,11 @@ int shizukugui_init(void)
         kurazy_tree_register_kernel(g.music_thread, parent);
         kurazy_tree_register_kernel(g.browser_thread, parent);
     }
-    g.ready = 1; keyboard_init();
-    if (browser_wait(browser_request("C:\\WWW\\INDEX.HTM", 0))) { g.failed = 1; return -1; }
+    g.ready = 1;
+    if (keyboard_init()) {
+        strcopy(g.message, "PS/2 keyboard unavailable: enable firmware USB legacy keyboard emulation.", sizeof g.message);
+        kprintf("SHZGUI KEYBOARD unavailable; desktop remains visible\n");
+    } else kprintf("SHZGUI KEYBOARD ready backend=i8042-polled\n");
     render();
     kprintf("SHZGUI READY backend=GOP size=%ux%u bpp=32 native_threads=%u,%u,%u\n", g.width, g.height,
             g.video_thread->id, g.music_thread->id, g.browser_thread->id);
@@ -589,6 +621,9 @@ int shizukugui_selftest(void)
     uint32_t first, second, full; unsigned notes_before; uint8_t invalid[24] = { 'K', 'V', '6', '4' };
     kz_video_t rejected; char path[160]; int failed = 0;
     if (!g.ready) return -1;
+    mutex_lock(&g.lock); g.music_playing = 0; g.history_count = 0; mutex_unlock(&g.lock);
+    thread_sleep_ms(15);
+    if (browser_wait(browser_request("C:\\WWW\\INDEX.HTM", 0))) ++failed;
     if (shizukugui_open(SHIZUKUGUI_VIDEO) || g.focus != SHIZUKUGUI_VIDEO ||
         shizukugui_open(SHIZUKUGUI_MUSIC) || g.focus != SHIZUKUGUI_MUSIC ||
         shizukugui_open(SHIZUKUGUI_BROWSER) || g.focus != SHIZUKUGUI_BROWSER) ++failed;
@@ -644,7 +679,7 @@ void shizukugui_run(void)
 {
     uint64_t last = 0;
     if (!g.ready) return;
-    kprintf("SHZGUI INTERACTIVE ready; F1 browser F2 video F3 music F4 tree F5 utilities F10 shutdown\n");
+    kprintf("SHZGUI INTERACTIVE ready; F1 browser F2 video F3 music F4 tree F5 utilities F8 acceptance F10 shutdown\n");
     while (!g.quit) {
         uint64_t now = ticks_now(); poll_keyboard();
         if ((g.dirty && now - last >= 50) || (g.focus == 4 && now - last >= 500)) { render(); last = now; }

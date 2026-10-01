@@ -22,11 +22,13 @@
 #define PMM_BASE 0xF00000ull
 #define MAX_PAGES (4096ull * 1024 * 1024 / PAGE_SIZE)
 
+#define MEM_HOLE_CAP 17u                    /* 16 firmware holes plus RAM-backed GOP scanout */
+static uint64_t hole_gpa[MEM_HOLE_CAP], hole_end[MEM_HOLE_CAP];
+static unsigned hole_count;
 #ifdef SHZ_STANDALONE
 _Static_assert(HEAP_PA == SHZ_K64_HEAP_GPA && PMM_BASE == SHZ_K64_PMM_GPA && HEAP_PA + HEAP_BYTES == PMM_BASE,
                "standalone/memholes.h plans holes for this layout");
-static uint64_t hole_gpa[SHZ_MEMHOLES_MAX], hole_end[SHZ_MEMHOLES_MAX];
-static unsigned hole_count;
+_Static_assert(MEM_HOLE_CAP > SHZ_MEMHOLES_MAX, "framebuffer hole needs one additional slot");
 #endif
 
 static uint8_t page_map[MAX_PAGES / 8];
@@ -82,6 +84,9 @@ static uint64_t *walk(uint64_t pml4, uint64_t va, int create, uint64_t user)
     int level;
     for (level = 3; level > 0; --level) {
         const unsigned idx = (va >> (12 + 9 * level)) & 511;
+        /* A 2 MiB/1 GiB leaf contains RAM, not another page table. Refuse
+         * accidental 4 KiB remapping through it rather than corrupting RAM. */
+        if ((t[idx] & (PT_P | (1ull << 7))) == (PT_P | (1ull << 7))) return 0;
         if (!(t[idx] & PT_P)) {
             uint64_t pa;
             if (!create)
@@ -203,14 +208,12 @@ static void heap_init(void)
     while (seg < window_end) {
         uint64_t stop = window_end, resume = window_end;
         struct hblock *b, *sentinel = 0;
-#ifdef SHZ_STANDALONE
         unsigned h;
         for (h = 0; h < hole_count; ++h)        /* the nearest hole at or after seg */
             if (hole_end[h] > seg && hole_gpa[h] < stop) {
                 stop = hole_gpa[h] > seg ? hole_gpa[h] : seg;
                 resume = hole_end[h];
             }
-#endif
         if (stop - seg >= 2 * hdr + 64) {
             b = (struct hblock *)p2v(seg);
             b->used = 0;
@@ -358,6 +361,28 @@ void mem_init(const shz_bootinfo_t *bi)
         }
     }
 #endif
+    /* GOP can be ordinary RAM (virtual firmware often uses this arrangement).
+     * Preserve scanout before allocating either page tables or heap blocks. */
+    if (SHZ_BOOTINFO_HAS(bi, fb_bpp) && bi->fb_base && bi->fb_pitch && bi->fb_height) {
+        const uint64_t bytes = (uint64_t)bi->fb_pitch * bi->fb_height;
+        if (bytes <= bi->fb_size && bytes <= (256ull << 20) && bi->fb_base <= UINT64_MAX - bytes - 4095) {
+            const uint64_t a = bi->fb_base & ~UINT64_C(4095);
+            const uint64_t z = (bi->fb_base + bytes + 4095) & ~UINT64_C(4095);
+            const uint64_t before = pmm_free_pages;
+            if (a < PMM_BASE && z > HEAP_PA) {
+                KASSERT(hole_count < MEM_HOLE_CAP);
+                hole_gpa[hole_count] = a < HEAP_PA ? HEAP_PA : a;
+                hole_end[hole_count++] = z;
+            }
+            for (off = a > PMM_BASE ? a : PMM_BASE; off < z && off < ram_top; off += PAGE_SIZE) {
+                i = (off - PMM_BASE) / PAGE_SIZE;
+                if (!bit_get(i)) { bit_set(i); --pmm_free_pages; }
+            }
+            if (a < ram_top)
+                kprintf("K64: GOP RAM scanout reserved at %llx..%llx, %u allocator page(s)\n",
+                        a, z, (uint32_t)(before - pmm_free_pages));
+        }
+    }
     /* Build the final tables while still running on the Supervisor's boot mapping, through
      * which physical memory below 1 GiB is reachable at K64_VIRT_BASE (phys_base_va). */
     kpml4 = pmm_alloc();
@@ -381,7 +406,11 @@ void mem_init(const shz_bootinfo_t *bi)
     heap_init();
     /* Probe the top of RAM through the direct map (exercises page directories beyond 1 GiB on big guests). */
     {
-        volatile uint64_t *top = (volatile uint64_t *)p2v(ram_top - PAGE_SIZE);
+        uint64_t probe_page = pmm_pages;
+        volatile uint64_t *top;
+        while (probe_page && bit_get(probe_page - 1)) --probe_page;
+        KASSERT(probe_page);
+        top = (volatile uint64_t *)p2v(PMM_BASE + (probe_page - 1) * PAGE_SIZE);
         const uint64_t pattern = 0x5348495a554b3634ull ^ ram_top;
         uint64_t saved = top[0];
         top[0] = pattern;

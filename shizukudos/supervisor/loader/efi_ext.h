@@ -11,6 +11,7 @@
 #define EFI_ALLOCATE_MAX_ADDRESS 1
 #define EFI_ALLOCATE_ADDRESS 2
 #define EFI_MEM_LOADER_DATA 2
+#define EFI_MEM_LOADER_CODE 1
 #define EFI_FILE_MODE_READ 1ull
 #define EFI_NOT_FOUND (EFI_ERROR_BIT | 14)
 
@@ -102,6 +103,7 @@ typedef struct EFI_MP_SERVICES_PROTOCOL {
     EFI_STATUS (EFIAPI *get_number_of_processors)(struct EFI_MP_SERVICES_PROTOCOL *, size_t *total, size_t *enabled);
 } EFI_MP_SERVICES_PROTOCOL;
 
+#if UINTPTR_MAX == UINT64_MAX
 _Static_assert(offsetof(EFI_FILE_PROTOCOL, read) == 32, "EFI_FILE_PROTOCOL.Read ABI");
 _Static_assert(offsetof(EFI_FILE_PROTOCOL, get_info) == 64, "EFI_FILE_PROTOCOL.GetInfo ABI");
 _Static_assert(offsetof(EFI_LOADED_IMAGE_PROTOCOL, device_handle) == 24, "LoadedImage ABI");
@@ -111,5 +113,16 @@ _Static_assert(offsetof(EFI_BOOT_SERVICES, free_pool) == 72, "FreePool ABI");
 _Static_assert(offsetof(EFI_BOOT_SERVICES, load_image) == 200, "LoadImage ABI");
 _Static_assert(offsetof(EFI_BOOT_SERVICES, start_image) == 208, "StartImage ABI");
 _Static_assert(offsetof(EFI_BOOT_SERVICES, unload_image) == 224, "UnloadImage ABI");
+#else
+_Static_assert(offsetof(EFI_FILE_PROTOCOL, read) == 20, "IA32 File.Read ABI");
+_Static_assert(offsetof(EFI_FILE_PROTOCOL, get_info) == 36, "IA32 File.GetInfo ABI");
+_Static_assert(offsetof(EFI_LOADED_IMAGE_PROTOCOL, device_handle) == 12, "IA32 LoadedImage ABI");
+_Static_assert(offsetof(EFI_LOADED_IMAGE_PROTOCOL, file_path) == 16, "IA32 LoadedImage.FilePath ABI");
+_Static_assert(offsetof(EFI_FILE_INFO, attribute) == 72, "IA32 FileInfo ABI");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, free_pool) == 48, "IA32 FreePool ABI");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, load_image) == 112, "IA32 LoadImage ABI");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, start_image) == 116, "IA32 StartImage ABI");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, unload_image) == 124, "IA32 UnloadImage ABI");
+#endif
 _Static_assert(sizeof(EFI_DEVICE_PATH_PROTOCOL) == 4, "device path node header");
 #endif

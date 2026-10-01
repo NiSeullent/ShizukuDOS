@@ -6,9 +6,43 @@
 #include "dos64.h"
 #include "cpu_modes.h"
 #include "shizukugui.h"
+#include "boot_console.h"
 
 static shz_bootinfo_t bootinfo;
+static unsigned desktop_failures;
 int initrd_files = -1;                          /* -1: none or rejected; read by the Win64 self-test */
+
+/* F8 runs the same full native/mode/media acceptance suite on the delivered
+ * desktop ISO. Startup reaches a visible, interactive desktop first. */
+unsigned shizukudos_acceptance_run(void)
+{
+    unsigned failures = cpu_modes_run_samples();
+    failures += dos64_run_samples();
+    failures += shizukugui_selftest() != 0;
+    desktop_failures += failures;
+    kprintf("SHZ-NATIVE-ACCEPT: %s failures=%u\n", failures ? "FAIL" : "PASS", failures);
+    return failures;
+}
+
+static uint64_t boot_tsc(void)
+{
+    uint32_t lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
+/* No sleep/hlt before IRQ0 has proved that it can wake the scheduler. TSC and
+ * an independent iteration ceiling keep absent-PIT diagnostics bounded. */
+static int timer_heartbeat(void)
+{
+    const uint64_t start = boot_tsc(), tick = ticks_now();
+    uint64_t budget = bootinfo.tsc_hz;
+    unsigned spins = 0;
+    if (budget < 1000000 || budget > 20000000000ull) budget = 1000000000;
+    while (ticks_now() - tick < 2 && boot_tsc() - start < budget && ++spins < 10000000u)
+        __asm__ volatile("pause");
+    return ticks_now() - tick >= 2 ? 0 : -1;
+}
 
 int k64_boot_framebuffer(k64_boot_fb_t *out)
 {
@@ -43,6 +77,8 @@ void kmain(uint64_t bootinfo_pa)
     bootinfo.cmdline[SHZ_CMDLINE_MAX - 1] = 0;
     arch_init();
     mem_init(&bootinfo);
+    (void)k64_boot_framebuffer_map();
+    k64_boot_console_stage("KERNEL MEMORY READY", "Loading the native desktop and packaged files.");
     krandom_init(&bootinfo, sizeof bootinfo);       /* before anything that needs random bytes (ASLR, user RNG) */
     kprintf("%s: Long Mode kernel starting, %u MiB RAM, rip above 4 GiB, tsc %u kHz\n", KVER,
             (uint32_t)(bootinfo.ram_size >> 20), (uint32_t)(bootinfo.tsc_hz / 1000));
@@ -66,26 +102,39 @@ void kmain(uint64_t bootinfo_pa)
             kprintf("%s: initrd mounted, %d file(s)\n", KVER, files);
         initrd_files = files;
     }
-    { extern void disk_init(void); disk_init(); }   /* standalone profile: AHCI disk -> FAT32 volume as D:\ (disk.c) */
+    /* The live desktop uses its immutable RAM archive. Optional AHCI probing
+     * is explicitly selected; other diagnostic profiles retain their disks. */
+    if (!dos64_boot_requested() || !k64_cmdline_has("shz.gui") || k64_cmdline_has("shz.disk")) {
+        k64_boot_console_stage("DISK DISCOVERY", "Discovering optional disk volumes.");
+        { extern void disk_init(void); disk_init(); }
+    }
+    k64_boot_console_stage("SCHEDULER STARTING", "Checking the PIT interrupt before any blocking wait.");
     sched_init();
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
     sti();
+    if (timer_heartbeat()) {
+        k64_boot_console_fail("TIMER INTERRUPT UNAVAILABLE", "IRQ0 did not arrive. Check the VM's legacy PIC/PIT support.");
+        kprintf("K64: timer heartbeat FAIL; no scheduler waits attempted\n");
+        shz_exit(96);
+    }
+    kprintf("K64: timer heartbeat PASS\n");
     if (k64_cmdline_has("shz.modes"))
         shz_exit(cpu_modes_run_samples() ? 1 : 0);
     if (dos64_boot_requested()) {
         unsigned failures = 0;
-        /* The old headless SD64 fault tests remain a bounded independent lane.
-         * The delivered GUI track exercises every native mode before going interactive. */
+        /* Headless mode still runs native tests automatically. The GUI's F8
+         * action runs the full suite once a visible desktop is available. */
         if (k64_cmdline_has("shz.gui")) {
-            failures += cpu_modes_run_samples();
+            k64_boot_console_stage("SHIZUKUGUI STARTING", "Preparing the GOP desktop, browser and media workers.");
             if (shizukugui_init()) {
+                k64_boot_console_fail("SHIZUKUGUI INITIALIZATION FAILED", "The framebuffer, packaged media or worker allocation failed.");
                 kprintf("SHZGUI: GOP initialization failed\n");
                 shz_exit(1);
             }
-            failures += dos64_run_samples();
-            failures += shizukugui_selftest() != 0;
-            kprintf("SHZ-NATIVE-ACCEPT: %s failures=%u\n", failures ? "FAIL" : "PASS", failures);
+            k64_boot_console_enable(0);
+            if (k64_cmdline_has("shz.acceptance")) (void)shizukudos_acceptance_run();
             shizukugui_run();
+            failures += desktop_failures;
         } else {
             failures += dos64_run_samples();
         }

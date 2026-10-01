@@ -10,7 +10,8 @@ native utility launcher. Space pauses/resumes video or music. In the browser,
 Tab selects a link, Enter opens it, Backspace returns to the previous page and
 the up/down arrows scroll. F6 opens an empty address field; type a packaged
 `C:\WWW\INDEX.HTM` path or numeric IPv4 HTTP URL and press Enter. In the launcher, Tab or arrows select a native EXE
-and Enter executes it. F10 ends the desktop and requests guest shutdown.
+and Enter executes it. F8 runs the explicit acceptance suite after the desktop is interactive.
+F10 ends the desktop and requests guest shutdown.
 Keyboard input currently requires an i8042 PS/2 keyboard or firmware emulation;
 USB HID and mouse input are not implemented in this standalone desktop.
 

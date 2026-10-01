@@ -16,18 +16,22 @@ jobs:
       - name: Install local build and isolated boot-test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm gcc gcc-multilib binutils gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 xorriso mtools qemu-system-x86 ovmf
+          sudo apt-get install -y nasm gcc gcc-multilib binutils gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 xorriso mtools qemu-system-x86 ovmf ovmf-ia32
       - name: Build independent DOS-only ISO
         run: python3 tools/build_iso.py
       - name: Verify native PE images and bounded media/legacy parsers
         run: |
           python3 -B samples/native/test_native.py
+          gcc -std=c11 -O2 -Wall -Wextra -Werror shizukudos/tests/test_boot_devices.c -o build/test-boot-devices
+          build/test-boot-devices
+          gcc -std=c11 -O2 -Wall -Wextra -Werror shizukudos/tests/test_boot_memory.c -o build/test-boot-memory
+          build/test-boot-memory
           gcc -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined samples/modes/test_formats.c -o build/modes/test_formats
           build/modes/test_formats
           gcc -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined samples/media/test_media.c shizukudos/kernel64/kurazy_media.c -o build/native/test_media
           build/native/test_media build/native/media
-      - name: Boot actual ISO with BIOS and UEFI, no NIC
-        run: python3 tools/test_iso.py --qemu /usr/bin/qemu-system-x86_64 --require-audio
+      - name: Boot exact ISO with BIOS, EFI32/64, USB, SATA, disk and no UART
+        run: python3 tools/test_iso.py --qemu /usr/bin/qemu-system-x86_64 --require-audio --timeout 240
       - name: Verify native sample fault and timeout containment
         run: python3 samples/dos64/test_runtime.py --qemu /usr/bin/qemu-system-x86_64
       - name: Package source and native application release
@@ -42,7 +46,7 @@ jobs:
             build/shizukudos-10-dos-only.iso.sha256
             build/iso/build-result.json
             build/iso-tests/result.json
-            build/iso-tests/*serial.log
-            build/iso-tests/*.png
-            build/iso-tests/*.wav
+            build/iso-tests/**/*serial.log
+            build/iso-tests/**/*.png
+            build/iso-tests/**/*.wav
             build/releases/*

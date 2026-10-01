@@ -18,6 +18,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_ISO = REPO / "build/shizukudos-10-dos-only.iso"
+RELEASE_VERSION = "10.0.1"
 
 
 def run(command):
@@ -142,17 +143,24 @@ def main():
     (tree / "SOURCE").mkdir()
     (tree / "SAMPLES").mkdir()
     shutil.copy2(bios_image(work), tree / "BOOT/DOS16.IMG")
-    efi = module(REPO / "shizukudos/standalone_uefi/build.py", "dos_uefi").build(
-        args.kernel, args.initrd, REPO / "build/standalone-uefi/BOOTX64.EFI", args.cmdline)
+    efi_builder = module(REPO / "shizukudos/standalone_uefi/build.py", "dos_uefi")
+    efi = efi_builder.build(args.kernel, args.initrd, REPO / "build/standalone-uefi/x64/BOOTX64.EFI", args.cmdline)
+    efi32 = efi_builder.build(args.kernel, args.initrd, REPO / "build/standalone-uefi/ia32/BOOTIA32.EFI",
+                             args.cmdline, architecture="ia32")
     (tree / "EFI/BOOT").mkdir(parents=True)
     shutil.copy2(efi, tree / "EFI/BOOT/BOOTX64.EFI")
+    shutil.copy2(efi32, tree / "EFI/BOOT/BOOTIA32.EFI")
     esp = tree / "BOOT/EFI.IMG"
-    esp_mib = max(16, (efi.stat().st_size + (8 << 20) + (1 << 20) - 1) >> 20)
+    # One FAT32 image serves both the optical El Torito entry and the GPT ESP.
+    # A 64 MiB minimum gives FAT32 enough clusters without depending on a
+    # firmware implementation's support for small FAT16 system partitions.
+    esp_mib = max(64, (efi.stat().st_size + efi32.stat().st_size + (8 << 20) + (1 << 20) - 1) >> 20)
     with esp.open("wb") as out:
         out.truncate(esp_mib << 20)
-    run(["mformat", "-i", esp, "-v", "SHIZUKUDOS", "::"])
+    run(["mformat", "-i", esp, "-F", "-v", "SHIZUKUDOS", "::"])
     run(["mmd", "-i", esp, "::/EFI", "::/EFI/BOOT"])
     run(["mcopy", "-i", esp, efi, "::/EFI/BOOT/BOOTX64.EFI"])
+    run(["mcopy", "-i", esp, efi32, "::/EFI/BOOT/BOOTIA32.EFI"])
     for directory in (args.initrd.parent, REPO / "build/modes", REPO / "build/dos64"):
         for path in sorted(directory.glob("*")):
             if path.is_file() and (path.suffix.upper() in (".EXE", ".SD64") or path == args.initrd):
@@ -163,12 +171,14 @@ def main():
     if source_hashes != initial_sources:
         raise RuntimeError("source changed while assembling the ISO; build again from stable source")
     (tree / "README.TXT").write_text(
-        "ShizukuDOS 10 — independent DOS-only distribution\n\n"
+        f"ShizukuDOS {RELEASE_VERSION} — independent DOS-only distribution\n\n"
         "BIOS optical boot starts the original real-mode DOS shell. Try HELP, DIR,\n"
-        "TYPE HELLO.TXT and EXEC DEMO.COM. UEFI x86-64 optical boot starts the\n"
-        "native standalone Kernel64, checks all three execution modes and opens\n"
-        "ShizukuGUI on the 32-bit GOP framebuffer. Real Mode MZ EXEs have no\n"
-        "suffix; protected PE32 utilities end in 32; PE32+ utilities end in 64.\n"
+        "TYPE HELLO.TXT and EXEC DEMO.COM. UEFI32/64 optical or disk boot starts\n"
+        "the native Kernel64, checks all three execution modes and opens\n"
+        "ShizukuGUI on the 32-bit GOP framebuffer. The ISO includes a GPT FAT32\n"
+        "EFI System Partition and can be written directly to USB for UEFI boot.\n"
+        "Real Mode MZ EXEs have no suffix; protected PE32 utilities end in 32;\n"
+        "PE32+ utilities end in 64.\n"
         "F1 browser, F2 video, F3 music, F4 thread tree, F5 utilities, F10 quit.\n"
         "The browser supports packaged local HTML; media formats and the scoped\n"
         "DOS API are documented in the complete source and kurazy specification.\n"
@@ -176,8 +186,11 @@ def main():
         "UEFI Secure Boot signing is not supplied. See docs/STATUS.md for scope.\n\n"
         "SOURCE includes corresponding source, GPLv2 license and license manifest.\n"
         "The Windows 98 Shizuku Modern Edition ISO is a separate release track.\n", encoding="utf-8")
-    manifest = {"product": "ShizukuDOS", "version": "10.0.0", "track": "dos-only",
+    manifest = {"product": "ShizukuDOS", "version": RELEASE_VERSION, "track": "dos-only",
                 "profiles": {"bios": "original real-mode DOS16 shell, COM16", "uefi-x86_64": "ShizukuGUI GOP32, native MZ16/PE32/PE32+, kurazy, no VMX"},
+                "boot_media": {"bios-optical": "El Torito FAT12 floppy emulation",
+                               "uefi-optical": "El Torito FAT32 EFI image",
+                               "uefi-usb-disk": "protective MBR, GPT EFI System Partition, FAT32 removable BOOTX64.EFI and BOOTIA32.EFI"},
                 "cmdline": args.cmdline, "kernel_sha256": sha(args.kernel), "initrd_sha256": sha(args.initrd),
                 "inputs_verified": not args.allow_unverified_inputs,
                 "source_hashes": source_hashes,
@@ -185,9 +198,13 @@ def main():
                           for path in sorted(tree.rglob("*")) if path.is_file()}}
     (tree / "MANIFEST.json").write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
     args.out.parent.mkdir(parents=True, exist_ok=True)
+    # Expose the same FAT32 payload through a GPT ESP for raw USB/disk media.
+    # xorriso records El Torito load-size 0 for EFI images above 32 MiB,
+    # meaning through end-of-medium; the FAT BPB and GPT retain exact bounds.
     run(["xorriso", "-as", "mkisofs", "-iso-level", "3", "-R", "-J", "-V", "SHIZUKUDOS10",
          "-b", "BOOT/DOS16.IMG", "-c", "BOOT/BOOT.CAT", "-eltorito-alt-boot", "-e", "BOOT/EFI.IMG",
-         "-no-emul-boot", "-o", args.out, tree])
+         "-no-emul-boot", "-efi-boot-part", "--efi-boot-image", "--protective-msdos-label",
+         "-o", args.out, tree])
     if source_manifest() != initial_sources:
         raise RuntimeError("source changed before ISO assembly finished; do not distribute this exploratory build")
     result = {"status": "BUILT", "iso": str(args.out), "bytes": args.out.stat().st_size,

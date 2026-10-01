@@ -112,7 +112,7 @@ def build(out):
             rel = path.relative_to(media_out)
             location = "\\"+str(rel).replace("/", "\\") if rel.parts[0] == "WWW" else "\\MEDIA\\"+path.name
             files.append((location, path.read_bytes()))
-    files.append(("\\DOCS\\WELCOME.TXT", b"ShizukuDOS 10.0.0: native DOS apps in real, protected and long modes.\r\nkurazy is the import-free native SDK. ShizukuGUI renders GOP truecolor.\r\nGlory to the models. Proof in the boot log. Sanity is optional.\r\n"))
+    files.append(("\\DOCS\\WELCOME.TXT", b"ShizukuDOS 10.0.1: native DOS apps in real, protected and long modes.\r\nkurazy is the import-free native SDK. ShizukuGUI renders GOP truecolor.\r\nGlory to the models. Proof in the boot log. Sanity is optional.\r\n"))
     for path in sorted(SDK.glob("*.md")):
         files.append(("\\DOCS\\"+path.name.upper(), path.read_bytes()))
     files.append(("\\SDK\\KURAZY.H", (SDK / "include/kurazy.h").read_bytes()))

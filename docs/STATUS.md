@@ -1,13 +1,15 @@
-# ShizukuDOS 10.0.0 release scope
+# ShizukuDOS 10.0.1 release scope
 
-10.0.0 is the first regular release of the independent native desktop track.
+10.0.1 repairs the EFI entry and boot-media paths of the independent native
+desktop track. 10.0.0 was validated only through BIOS/UEFI virtual CD-ROM;
+its raw USB layout and IA32 EFI entry were missing.
 The operating-system architecture remains experimental; the release contract
 is the functionality checked on its exact ISO bytes, with corresponding source
 and evidence attached to the GitHub release.
 
-The UEFI path exits firmware boot services, executes three real DOS MZ16
-programs, three PE32/i386 programs and fourteen import-free PE32+/AMD64 programs,
-then leaves ShizukuGUI interactive on the firmware's 32-bit GOP framebuffer.
+The IA32/x64 UEFI paths exit firmware boot services and open ShizukuGUI on
+the firmware's 32-bit GOP framebuffer. F8 runs three real DOS MZ16 programs,
+three PE32/i386 programs and fourteen import-free PE32+/AMD64 programs.
 Mode checks read actual CR0, EFER and segment registers. Long-mode EXEs run in
 ring 3 with private address spaces; trusted 16/32-bit samples use a privileged,
 synchronous mode bridge with masked interrupts. The bridge is not a sandbox
@@ -33,11 +35,12 @@ exercised by native EXEs. The
 [versioned specification](../sdk/kurazy/SPEC.md), C header, static library and all
 twenty EXE sources are distributed with the image.
 
-Release acceptance uses actual BIOS and UEFI ISO boots under isolated QEMU TCG,
+Release acceptance uses the exact ISO for BIOS, IA32/x64 UEFI optical, SATA,
+raw USB, disk and absent-UART boots under isolated QEMU TCG,
 no NIC or host disk, actual framebuffer screenshots and keyboard input. A
 loopback HTTP transaction exercises both ends of the native TCP path. Stock
 QEMU also records and checks non-silent PC-speaker audio; distribution builds
 that omit the speaker explicitly record that limitation. The test is not
-physical-machine certification. GOP, fixed conventional-memory allocations
+physical-machine certification. GOP, reclaimable conventional-memory windows
 and PS/2 keyboard input (or firmware emulation) are required; USB HID, graphics
 acceleration and Secure Boot signing are not implemented here.

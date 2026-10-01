@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only
- * Original minimal x64 UEFI ABI declarations, derived from UEFI 2.10 interfaces.
+ * Original minimal IA32/x64 UEFI ABI declarations, derived from UEFI 2.10 interfaces.
  * No EDK II, GNU-EFI, Windows, FreeDOS, or KernelEx implementation is used.
  */
 #ifndef SHIZUKUDOS_EFI_H
@@ -7,12 +7,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#if UINTPTR_MAX == UINT64_MAX
 #define EFIAPI __attribute__((ms_abi))
-typedef uint64_t EFI_STATUS;
+#elif UINTPTR_MAX == UINT32_MAX
+#define EFIAPI __attribute__((cdecl))
+#else
+#error Unsupported UEFI pointer size
+#endif
+typedef uintptr_t EFI_STATUS;
 typedef void *EFI_HANDLE;
 typedef uint16_t CHAR16;
-#define EFI_SUCCESS UINT64_C(0)
-#define EFI_ERROR_BIT (UINT64_C(1) << 63)
+#define EFI_SUCCESS ((EFI_STATUS)0)
+#define EFI_ERROR_BIT ((EFI_STATUS)1 << (sizeof(EFI_STATUS) * 8 - 1))
 #define EFI_INVALID_PARAMETER (EFI_ERROR_BIT | 2)
 #define EFI_UNSUPPORTED (EFI_ERROR_BIT | 3)
 #define EFI_BUFFER_TOO_SMALL (EFI_ERROR_BIT | 5)
@@ -95,13 +101,23 @@ typedef struct {
 } EFI_GOP_MODE;
 typedef struct { void *query_mode, *set_mode, *blt; EFI_GOP_MODE *mode; } EFI_GOP;
 
-_Static_assert(sizeof(void *) == 8, "This loader requires the x64 UEFI ABI");
 _Static_assert(sizeof(EFI_TABLE_HEADER) == 24, "UEFI header layout");
 _Static_assert(sizeof(EFI_MEMORY_DESCRIPTOR) == 40, "UEFI descriptor prefix");
+#if UINTPTR_MAX == UINT64_MAX
 _Static_assert(offsetof(EFI_BOOT_SERVICES, get_memory_map) == 56, "GetMemoryMap ABI");
 _Static_assert(offsetof(EFI_BOOT_SERVICES, exit_boot_services) == 232, "ExitBootServices ABI");
 _Static_assert(offsetof(EFI_BOOT_SERVICES, locate_protocol) == 320, "LocateProtocol ABI");
 _Static_assert(offsetof(EFI_SYSTEM_TABLE, boot_services) == 96, "SystemTable ABI");
 _Static_assert(sizeof(EFI_GOP_INFO) == 36, "GOP information ABI");
 _Static_assert(sizeof(EFI_GOP_MODE) == 40, "GOP mode ABI");
+#else
+/* UEFI IA32 aligns UINT64 on eight bytes: build with -malign-double. */
+_Static_assert(_Alignof(uint64_t) == 8, "UEFI IA32 requires -malign-double");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, get_memory_map) == 40, "IA32 GetMemoryMap ABI");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, exit_boot_services) == 128, "IA32 ExitBootServices ABI");
+_Static_assert(offsetof(EFI_BOOT_SERVICES, locate_protocol) == 172, "IA32 LocateProtocol ABI");
+_Static_assert(offsetof(EFI_SYSTEM_TABLE, boot_services) == 60, "IA32 SystemTable ABI");
+_Static_assert(sizeof(EFI_GOP_INFO) == 36, "IA32 GOP information ABI");
+_Static_assert(sizeof(EFI_GOP_MODE) == 32, "IA32 GOP mode ABI");
+#endif
 #endif

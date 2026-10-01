@@ -30,7 +30,7 @@ def git(*args):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--version", default="10.0.0-preview.1")
+    ap.add_argument("--version", default="10.0.0")
     ap.add_argument("--out", type=Path, default=ROOT / "build" / "releases")
     args = ap.parse_args()
     if not re.fullmatch(r"[0-9][0-9A-Za-z.-]*", args.version):
@@ -54,11 +54,20 @@ def main():
     source_hashes = {name: digest(ROOT / name) for name in tracked}
     if source_hashes != result.get("source_hashes"):
         raise SystemExit("release refused: current source differs from the source on the tested ISO; rebuild and retest")
-    apps = ROOT / "build" / "dos64"
-    for name in ("HELLO64.SD64", "MEM64.SD64", "DOS64.IMG"):
-        expected = result.get("payload_hashes", {}).get("SAMPLES/" + name, {}).get("sha256")
-        if not expected or digest(apps / name) != expected:
-            raise SystemExit("release refused: native sample artifact differs from the tested ISO: " + name)
+    apps = ROOT / "build" / "native"
+    samples = {}
+    for name, record in result.get("payload_hashes", {}).items():
+        if not name.startswith("SAMPLES/"):
+            continue
+        filename = Path(name).name
+        candidates = [ROOT / "build" / directory / filename for directory in ("native", "modes", "dos64")]
+        path = next((p for p in candidates if p.is_file() and digest(p) == record["sha256"]), None)
+        if path is None:
+            raise SystemExit("release refused: application artifact differs from the tested ISO: " + name)
+        samples[filename] = path
+    library = apps / "libkurazy64.a"
+    if digest(library) != result.get("initrd_files", {}).get("\\SDK\\LIBKURAZY64.A"):
+        raise SystemExit("release refused: static SDK differs from the SDK on the tested ISO")
     out = args.out.resolve()
     out.mkdir(parents=True, exist_ok=True)
     stem = f"shizukudos-{args.version}"
@@ -67,26 +76,32 @@ def main():
     source = out / f"{stem}-source.tar.gz"
     archive = git("archive", "--format=tar", f"--prefix={stem}/", "HEAD")
     source.write_bytes(gzip.compress(archive, mtime=0))
-    sample_zip = out / f"{stem}-dos64-samples.zip"
+    sample_zip = out / f"{stem}-native-apps-and-sdk.zip"
     with zipfile.ZipFile(sample_zip, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for path in sorted((ROOT / "samples" / "dos64").rglob("*")):
+        for path in sorted((ROOT / "samples").rglob("*")) + sorted((ROOT / "sdk" / "kurazy").rglob("*")):
             if path.is_file() and "__pycache__" not in path.parts:
                 zf.write(path, str(path.relative_to(ROOT)))
-        for name in ("HELLO64.SD64", "MEM64.SD64", "DOS64.IMG", "build-result.json"):
-            zf.write(apps / name, f"bin/{name}")
+        for name, path in sorted(samples.items()):
+            zf.write(path, f"bin/{name}")
+        zf.write(library, "lib/" + library.name)
+        for name in ("shizukudos/win64/pe_parse.c", "shizukudos/win64/pe_parse.h", "shizukudos/kernel64/cpu_modes_formats.h",
+                     "shizukudos/kernel64/kurazy_media.c", "shizukudos/kernel64/kurazy_media.h"):
+            zf.write(ROOT / name, name)
+        for path in (apps / "build-result.json", ROOT / "tools/build_apps.py", ROOT / "tools/build_mode_apps.py"):
+            zf.write(path, str(path.relative_to(ROOT)))
         zf.write(ROOT / "LICENSE", "LICENSE")
         zf.write(ROOT / "SOURCE_ORIGIN.json", "SOURCE_ORIGIN.json")
     evidence = out / f"{stem}-evidence.tar.gz"
     # Only this release's isolated tests are included, never another project's build tree.
     stream = io.BytesIO()
     with tarfile.open(fileobj=stream, mode="w") as tf:
-        evidence_paths = [ROOT / "build" / "iso-tests", ROOT / "build" / "results",
-                          ROOT / "build" / "dos64" / "validation", ROOT / "build" / "host-tests.log"]
+        evidence_paths = [ROOT / "build" / "iso-tests", ROOT / "build" / "native" / "validation", ROOT / "build" / "native" / "host-test-result.json",
+                          ROOT / "build" / "dos64" / "validation", ROOT / "build" / "modes" / "validation"]
         for base in evidence_paths:
             if not base.exists():
                 continue
             for path in [base] if base.is_file() else sorted(base.rglob("*")):
-                if not path.is_file() or path.suffix not in (".json", ".log", ".txt", ".png"):
+                if not path.is_file() or path.suffix not in (".json", ".log", ".txt", ".png", ".wav"):
                     continue
                 rel = path.relative_to(ROOT / "build")
                 info = tf.gettarinfo(str(path), str(rel))

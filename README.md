@@ -28,7 +28,7 @@ upstream commit and copied file hashes.
 python3 -B shizukudos/tools/shz.py doctor
 python3 -B shizukudos/tools/shz.py build --profile dos-only
 python3 -B shizukudos/tools/shz.py test --suite iso
-python3 -B shizukudos/tools/shz.py package --version 10.0.0-preview.1
+python3 -B shizukudos/tools/shz.py package --version 10.0.0
 ```
 
 The default build uses installed NASM, GCC/binutils, x64 MinGW, mtools, and
@@ -36,29 +36,58 @@ xorriso. It writes generated artifacts under `build/`, fetches no upstream
 source, and changes no host boot or client configuration. QEMU and OVMF are
 needed for the boot checks. See [ISO instructions](docs/ISO.md).
 
-The ISO boots the original 16-bit FAT12 shell on BIOS and the independent
-Kernel64 directly on x64 UEFI. Its UEFI demo profile runs the native DOS64
-samples. Those samples use ShizukuDOS's experimental 64-bit syscall ABI;
-they are not classic `.COM` programs. The default disc contains no Windows
-installation payload, Windows wrapper DLL package, FreeDOS, CSMWrap, or GRUB.
+The ISO boots the original 16-bit FAT12 shell on BIOS. On x64 UEFI it starts
+Kernel64, executes actual Real Mode and Protected Mode examples, returns to
+Long Mode, runs fourteen native PE32+ utilities, and opens **ShizukuGUI**.
+The desktop writes 32-bit truecolor pixels directly to the GOP framebuffer.
+Its video, music and browser services have separate scheduled workers beneath
+the desktop in an inspectable **thread tree**.
+
+PE32+ describes the executable format. [kurazy](sdk/kurazy/SPEC.md) supplies the
+native API: these applications run without Windows DLLs. The original raw SD64
+examples remain available beside the new EXEs. The release includes its own
+bootloader, complete source, static SDK, sample programs and generated media.
 
 ## Execution environments
 
 | Component | Status and boundary |
 | --- | --- |
-| Original Real Mode shell | Implemented BIOS FAT12 shell with a small `INT 21h` subset and `.COM` execution. General DOS compatibility remains limited. |
-| Native DOS64 apps | Experimental x86-64 flat binaries, loaded into user processes by Kernel64. Sources and ABI are in [samples/dos64](samples/dos64/README.md). |
-| Protected Mode Kernel32 | Separate implemented i486 kernel source and standalone boot stub; built alongside Kernel64. Its guest execution is outside this release's acceptance checks. |
-| Long Mode Kernel64 | Implemented x86-64 kernel and user-process infrastructure. The default UEFI profile runs directly, without the Supervisor or VMX. |
+| Real Mode | BIOS FAT12 shell with `.COM` execution, plus a native UEFI mode bridge for the supplied DOS MZ16 EXEs and a scoped `INT 21h` subset. |
+| Protected Mode | Supplied PE32/i386 utilities execute with paging off, `CR0.PE=1`, and a 32-bit code segment, then return to the desktop. Separate Kernel32 remains a research build. |
+| Long Mode | Native PE32+/AMD64 utilities run in ring 3 under Kernel64. `CR0`, `EFER`, real exit codes and memory above 4 GiB provide execution evidence. |
+| ShizukuGUI | Software composition on the firmware's 32-bit GOP framebuffer; PS/2 keyboard control, player panes, browser, utilities and live thread tree. |
+| kurazy | Versioned native API, static `libkurazy64.a`, file/memory/time services and owned parent/child threads with cancellation and join. |
 | Virtual Real Mode | Optional Intel VMX Supervisor and pinned FreeDOS research profile. Requires its own build, hardware prerequisites, and validation. |
 | CSMWrap | Optional external firmware bridge, with its own source pins and licenses. Excluded from the default ISO. |
 | Legacy Windows integration | Source lineage and shared experimental contracts remain available. This DOS release does not install, boot, or replace the Windows 98 DOS core. |
 
-The default release is a bootable developer preview: a BIOS shell and a UEFI
-native-sample runner, rather than a complete general-purpose DOS system. The
-UEFI profile currently has serial output and no interactive DOS64 command shell.
-Hardware coverage, general DOS program compatibility, and simultaneous
-multi-kernel execution need separate evidence. See [current release status](docs/STATUS.md).
+Version **10.0.0** is the regular release of this scoped native desktop track.
+The architecture remains experimental. Native 16/32-bit launches are trusted,
+synchronous compatibility demonstrations; they are not sandboxed legacy
+processes. DOS API coverage and hardware support have explicit bounds in the
+[release status](docs/STATUS.md) and [kurazy specification](sdk/kurazy/SPEC.md).
+
+## The applications
+
+| Execution mode | Names on the ISO |
+| --- | --- |
+| Real Mode, DOS MZ16 | `HELLO.EXE`, `MODE.EXE`, `COUNT.EXE` |
+| Protected Mode, PE32 | `HELLO32.EXE`, `MODE32.EXE`, `COUNT32.EXE` |
+| Long Mode, PE32+ | `HELLO64`, `MEM64`, `TIME64`, `DIR64`, `TYPE64`, `HASH64`, `INFO64`, `THREAD64`, `TREE64`, `CHECK64`, `CPU64`, `VIDEO64`, `MUSIC64`, `BROWSE64` — all `.EXE` |
+
+`MEM64.EXE` verifies allocation and release; `MEM64.SD64` verifies memory above
+the 4 GiB boundary. `THREAD64` creates actual
+parent/child/grandchild threads and checks ownership, cancellation and joining.
+`CHECK64` exercises rejected API requests. The media EXEs activate the desktop's
+working services through kurazy.
+
+ShizukuGUI plays the supplied uncompressed RGB animation and timed PC-speaker
+music. Its original HTML parser supports document links, history and scrolling.
+These deliberately small formats keep every decoder and fixture in the source
+tree. See [media formats and browser scope](samples/media/README.md).
+
+Use **F1** browser, **F2** video, **F3** music, **F4** thread tree, **F5** utilities,
+**Space** pause/resume, **Tab/Enter** select/open and **F10** shutdown.
 
 ## Why does this exist?
 
@@ -104,7 +133,7 @@ include the corresponding source used to build the disc. Optional FreeDOS,
 CSMWrap, Wine-derived ports, and other research paths have separate dependencies
 and are never silently added to the DOS-only release.
 
-[Download the developer preview](https://github.com/NiSeullent/ShizukuDOS/releases)
+[Download ShizukuDOS](https://github.com/NiSeullent/ShizukuDOS/releases)
 or read the [architecture and catchphrase set](docs/BRANDING.md).
 
 **The design review said no. The boot log had other plans.**

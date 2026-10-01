@@ -34,8 +34,8 @@ into distinct environments. Compatibility layers, virtualization, and explicit
 mode transitions provide ways to connect them without pretending every machine
 is an old IBM PC forever.
 
-The independent DOS-only preview boots an original BIOS shell or a native UEFI
-Kernel64 sample runner. Wider DOS compatibility, the VMX Supervisor, firmware
+The independent DOS-only release boots an original BIOS shell or a native UEFI
+ShizukuGUI desktop with actual 16-, 32- and 64-bit examples. Wider DOS compatibility, the VMX Supervisor, firmware
 bridges, and legacy Windows integration remain separate research paths with
 their own prerequisites. The architecture is ambitious; the release claims
 stop where its evidence stops. The absurdity is in the boot sequence, not the
@@ -60,8 +60,11 @@ separate hardware-dependent profile, not a property of the native UEFI demo.
 
 The **Protected Mode kernel** targets 32-bit x86 and has its own entry code and
 runtime. The **Long Mode kernel** targets x86-64 and runs native DOS64 processes
-through a documented experimental ABI. The preview demonstrates two such
-programs, rather than promising that arbitrary DOS binaries become 64-bit.
+through the versioned kurazy ABI. The regular desktop track includes fourteen
+actual PE32+ utilities, six native legacy-mode EXEs and two earlier SD64 examples.
+Its mode bridge executes scoped DOS MZ16 and PE32 samples and returns to Long Mode.
+ShizukuGUI composes truecolor pixels through GOP and exposes media, HTML/HTTP
+and owned thread trees with explicit implementation bounds.
 
 **CSMWrap** is an optional external bridge for restoring selected legacy
 firmware assumptions on UEFI systems. Its licensing and build prerequisites
@@ -82,8 +85,8 @@ ShizukuDOS opened another kernel.
 ## README short description
 
 ShizukuDOS 10 is an experimental multi-kernel DOS architecture spanning BIOS,
-UEFI, and x86-64. Its independent DOS-only preview boots an original legacy
-shell or a native Long Mode kernel with runnable 64-bit samples.
+UEFI, and x86-64. Its independent DOS-only release boots an original legacy
+shell or ShizukuGUI with actual 16-, 32- and 64-bit applications and a native SDK.
 
 ## Repository subtitle
 

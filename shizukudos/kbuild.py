@@ -92,12 +92,28 @@ def build_kernel(name, directory, cflags, nasm_fmt, ld_emul, out_name, extra_c=(
 
 
 def main():
-    argparse.ArgumentParser(description=__doc__).parse_args()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--standalone-only", action="store_true", help="build only the independent native desktop kernel and its diagnostic stub")
+    args = parser.parse_args()
     source_files = shzlib.source_manifest()
     for tool in ("nasm", "gcc", "ld", "nm", "objcopy", "objdump"):
         if not shutil.which(tool):
             raise SystemExit(f"required tool missing: {tool}")
     results = {}
+    if args.standalone_only:
+        libsfs = sorted((REPO / "shizukufs" / "v1" / "libsfs").glob("*.c"))
+        native = build_kernel("kernel64s", "kernel64", K64_FLAGS + ["-DSHZ_STANDALONE"], "elf64", "elf_x86_64",
+                              "KERNEL64S.BIN", extra_c=[SHZ / "win64" / "pe_parse.c", STUB_DIR / "standalone64.c",
+                                                        REPO / "drivers" / "ahci_native" / "ahci.c", *libsfs])
+        stub = build_standalone_stub()
+        if shzlib.source_manifest() != source_files:
+            raise RuntimeError("Source changed during kernel compilation; rebuild from a stable source copy")
+        shzlib.write_json(BUILD / "kernels-build-result.json", {
+            "source_files_sha256": source_files,
+            "kernels": {"kernel64-standalone": {"bytes": native["bytes"], "sha256": native["sha256"],
+                       "elf_sha256": native["elf_sha256"], "stub_sha256": stub["sha256"],
+                       "commands": [[str(x) for x in c] for c in native["commands"]]}}})
+        return 0
     k32 = build_kernel("kernel32", "kernel32", K32_FLAGS, "elf32", "elf_i386", "KERNEL32.BIN")
     # The PE32+ parser is shared with the host tests; Kernel64 links the same source freestanding.
     # ShizukuFS v1 (ext4 format, jbd2): the portable libsfs sources are linked freestanding (kernel64/sfs_mount.c).

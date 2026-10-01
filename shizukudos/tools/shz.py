@@ -44,7 +44,7 @@ def main():
     test = sub.add_parser("test", help="run a focused suite; save its result under build/")
     test.add_argument("--suite", choices=("host", "iso"), default="iso")
     package = sub.add_parser("package", help="package the verified DOS release and corresponding source")
-    package.add_argument("--version", default="10.0.0-preview.1")
+    package.add_argument("--version", default="10.0.0")
     args = ap.parse_args()
     if args.command == "doctor":
         return doctor()

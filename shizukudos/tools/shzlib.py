@@ -28,10 +28,11 @@ RESULTS = ("PASS", "FAIL", "SKIP", "BLOCKED")
 def source_manifest():
     """Hash the complete source copy, excluding generated files and Git metadata."""
     omitted = {".git", "build", "__pycache__", ".pytest_cache"}
-    return {str(path.relative_to(REPO)): sha256_file(path)
-            for path in sorted(REPO.rglob("*"))
-            if path.is_file() and not path.is_symlink()
-            and not any(part in omitted for part in path.relative_to(REPO).parts)}
+    paths = []
+    for directory, folders, files in os.walk(REPO):
+        folders[:] = [name for name in folders if name not in omitted and not (Path(directory) / name).is_symlink()]
+        paths.extend(Path(directory) / name for name in files if not (Path(directory) / name).is_symlink())
+    return {str(path.relative_to(REPO)): sha256_file(path) for path in sorted(paths)}
 
 
 def sha256_file(path):

@@ -4,6 +4,8 @@
 #include "proc_internal.h"
 #include "fs.h"
 #include "dos64.h"
+#include "cpu_modes.h"
+#include "shizukugui.h"
 
 static shz_bootinfo_t bootinfo;
 int initrd_files = -1;                          /* -1: none or rejected; read by the Win64 self-test */
@@ -50,7 +52,7 @@ void kmain(uint64_t bootinfo_pa)
         kprintf("%s: command line \"%s\"\n", KVER, bootinfo.cmdline);
     if (!k64_boot_framebuffer(&fb))
         kprintf("%s: UEFI GOP framebuffer %ux%u, pitch %u, %s, at %llx (%llu KiB): available through "
-                "k64_boot_framebuffer(); the GOP display backend (gfx_gop.c) drives it unless a virtio-gpu is present\n", KVER, fb.width, fb.height, fb.pitch,
+                "k64_boot_framebuffer(); ShizukuGUI uses the GOP framebuffer directly\n", KVER, fb.width, fb.height, fb.pitch,
                 fb.format == SHZ_FB_BGRX8888 ? "BGRX" : "RGBX", fb.base, fb.size >> 10);
 #ifdef SHZ_STANDALONE
     { extern void pci_log_devices(void); pci_log_devices(); }        /* device inventory; port I/O is only safe without the Supervisor */
@@ -68,10 +70,26 @@ void kmain(uint64_t bootinfo_pa)
     sched_init();
     KASSERT(shz_timer_set(VEC_TIMER, TICK_US) == 0);
     sti();
+    if (k64_cmdline_has("shz.modes"))
+        shz_exit(cpu_modes_run_samples() ? 1 : 0);
     if (dos64_boot_requested()) {
-        /* Native DOS-only ISO: execute the SD64 samples directly, then report
-         * their real process exit status. No Win64 DLL or Win98 peer is needed. */
-        shz_exit(dos64_run_samples() ? 1 : 0);
+        unsigned failures = 0;
+        /* The old headless SD64 fault tests remain a bounded independent lane.
+         * The delivered GUI track exercises every native mode before going interactive. */
+        if (k64_cmdline_has("shz.gui")) {
+            failures += cpu_modes_run_samples();
+            if (shizukugui_init()) {
+                kprintf("SHZGUI: GOP initialization failed\n");
+                shz_exit(1);
+            }
+            failures += dos64_run_samples();
+            failures += shizukugui_selftest() != 0;
+            kprintf("SHZ-NATIVE-ACCEPT: %s failures=%u\n", failures ? "FAIL" : "PASS", failures);
+            shizukugui_run();
+        } else {
+            failures += dos64_run_samples();
+        }
+        shz_exit(failures ? 1 : 0);
     }
     run_self_tests(&bootinfo);
     /* NT driver host: the single init call. A complete no-op unless the initrd carries

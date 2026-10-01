@@ -10,15 +10,22 @@ permissions:
 jobs:
   dos-only:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - name: Install local build and isolated boot-test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm gcc gcc-multilib binutils gcc-mingw-w64-x86-64 xorriso mtools qemu-system-x86 ovmf
+          sudo apt-get install -y nasm gcc gcc-multilib binutils gcc-mingw-w64-x86-64 gcc-mingw-w64-i686 xorriso mtools qemu-system-x86 ovmf
       - name: Build independent DOS-only ISO
         run: python3 tools/build_iso.py
+      - name: Verify native PE images and bounded media/legacy parsers
+        run: |
+          python3 -B samples/native/test_native.py
+          gcc -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined samples/modes/test_formats.c -o build/modes/test_formats
+          build/modes/test_formats
+          gcc -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined samples/media/test_media.c shizukudos/kernel64/kurazy_media.c -o build/native/test_media
+          build/native/test_media build/native/media
       - name: Boot actual ISO with BIOS and UEFI, no NIC
         run: python3 tools/test_iso.py --qemu /usr/bin/qemu-system-x86_64
       - name: Verify native sample fault and timeout containment
@@ -36,4 +43,6 @@ jobs:
             build/iso/build-result.json
             build/iso-tests/result.json
             build/iso-tests/*serial.log
+            build/iso-tests/*.png
+            build/iso-tests/*.wav
             build/releases/*

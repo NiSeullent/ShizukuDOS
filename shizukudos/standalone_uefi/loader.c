@@ -23,6 +23,8 @@ EFI_STATUS (EFIAPI *volatile dos_entry_address)(EFI_HANDLE, EFI_SYSTEM_TABLE *) 
 #define TRAMP_PA UINT64_C(0x5000)
 #define GDT_PA UINT64_C(0x5800)
 #define GDTR_PA UINT64_C(0x5820)
+#define MODES_PA UINT64_C(0x10000)
+#define MODES_PAGES 96u
 #define KERNEL_ENTRY UINT64_C(0xffffffff80100000)
 
 static SD_HANDOFF handoff;
@@ -99,11 +101,12 @@ static __attribute__((noreturn)) void halt(const char *why)
     serial("DOS-UEFI: FAILED: "); serial(why); serial("\n");
     for (;;) __asm__ volatile("cli; hlt");
 }
-static void release_pages(EFI_BOOT_SERVICES *bs, int low, int kernel, int initrd, size_t isize)
+static void release_pages(EFI_BOOT_SERVICES *bs, int low, int modes, int kernel, int initrd, size_t isize)
 {
     EFI_FREE_PAGES_FN free_pages = (EFI_FREE_PAGES_FN)bs->free_pages;
     if (initrd) free_pages(INITRD_PA, (isize + 4095) >> 12);
     if (kernel) free_pages(KERNEL_PA, 512);
+    if (modes) free_pages(MODES_PA, MODES_PAGES);
     if (low) free_pages(0x1000, 7);
 }
 /* Copied to a reserved identity-mapped low page before replacing firmware CR3.
@@ -134,7 +137,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     EFI_GOP *gop = 0;
     SD_FRAMEBUFFER fb;
     size_t i;
-    int low_alloc = 0, kernel_alloc = 0, initrd_alloc = 0;
+    int low_alloc = 0, modes_alloc = 0, kernel_alloc = 0, initrd_alloc = 0;
     system_table = st;
     serial_init();
     if (!st || st->header.signature != EFI_SYSTEM_TABLE_SIGNATURE || !(bs = st->boot_services) ||
@@ -152,6 +155,13 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     status = allocate(EFI_ALLOCATE_ADDRESS, EFI_MEM_LOADER_DATA, 7, &addr);
     low_alloc = !EFI_ERROR(status);
     if (!EFI_ERROR(status)) {
+        /* The native Real/Protected Mode transition island and executable
+         * arenas must belong to us before firmware boot services disappear. */
+        addr = MODES_PA;
+        status = allocate(EFI_ALLOCATE_ADDRESS, EFI_MEM_LOADER_DATA, MODES_PAGES, &addr);
+        modes_alloc = !EFI_ERROR(status);
+    }
+    if (!EFI_ERROR(status)) {
         addr = KERNEL_PA;
         status = allocate(EFI_ALLOCATE_ADDRESS, EFI_MEM_LOADER_DATA, 512, &addr);
         kernel_alloc = !EFI_ERROR(status);
@@ -163,10 +173,11 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     }
     if (EFI_ERROR(status)) {
         say("DOS-UEFI: firmware owns a required fixed address; kernel was not started.\n");
-        release_pages(bs, low_alloc, kernel_alloc, initrd_alloc, isize);
+        release_pages(bs, low_alloc, modes_alloc, kernel_alloc, initrd_alloc, isize);
         return status;
     }
     zero((void *)(uintptr_t)0x1000, 0x7000);
+    zero((void *)(uintptr_t)MODES_PA, MODES_PAGES * 4096);
     zero((void *)(uintptr_t)KERNEL_PA, 0x200000);
     copy((void *)(uintptr_t)KERNEL_PA, dos_kernel_start, ksize);
     copy((void *)(uintptr_t)INITRD_PA, dos_initrd_start, isize);
@@ -194,7 +205,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     status = sd_exit_boot_services(bs, image, &handoff);
     if (EFI_ERROR(status) && !handoff.exit_attempted) {
         if (handoff.memory_map) bs->free_pool(handoff.memory_map);
-        release_pages(bs, low_alloc, kernel_alloc, initrd_alloc, isize);
+        release_pages(bs, low_alloc, modes_alloc, kernel_alloc, initrd_alloc, isize);
         return status;
     }
     __asm__ volatile("cli" ::: "memory");

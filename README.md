@@ -28,6 +28,7 @@ upstream commit and copied file hashes.
 python3 -B shizukudos/tools/shz.py doctor
 python3 -B shizukudos/tools/shz.py build --profile dos-only
 python3 -B shizukudos/tools/shz.py test --suite iso
+python3 -B tools/test_virtualbox.py
 python3 -B shizukudos/tools/shz.py package --version 10.0.1
 ```
 

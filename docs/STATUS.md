@@ -38,7 +38,9 @@ twenty EXE sources are distributed with the image.
 Release acceptance uses the exact ISO for BIOS, IA32/x64 UEFI optical, SATA,
 raw USB, disk and absent-UART boots under isolated QEMU TCG,
 no NIC or host disk, actual framebuffer screenshots and keyboard input. A
-loopback HTTP transaction exercises both ends of the native TCP path. Stock
+formal release additionally requires actual VirtualBox 7 EFI32 and EFI64 DVD
+boots with the same ISO hash, desktop interaction and all native mode checks.
+A loopback HTTP transaction exercises both ends of the native TCP path. Stock
 QEMU also records and checks non-silent PC-speaker audio; distribution builds
 that omit the speaker explicitly record that limitation. The test is not
 physical-machine certification. GOP, reclaimable conventional-memory windows

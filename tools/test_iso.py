@@ -169,8 +169,12 @@ def base_command(qemu, iso, media="optical", machine="pc", ram=256):
         command += ["-device", "qemu-xhci,id=boot-usb", "-drive", f"if=none,format=raw,readonly=on,file={iso},id=boot-media",
                     "-device", "usb-storage,drive=boot-media,bootindex=1"]
     elif media in ("sata-optical", "disk"):
+        # ide-hd requires a writable top node. A disposable snapshot accepts
+        # guest writes while the exact distributed ISO remains its unchanged
+        # backing file; optical media stays read-only.
+        options = "readonly=on,media=cdrom" if media == "sata-optical" else "snapshot=on"
         command += ["-device", "ich9-ahci,id=boot-sata", "-drive",
-                    f"if=none,format=raw,readonly=on,file={iso},id=boot-media" + (",media=cdrom" if media == "sata-optical" else ""),
+                    f"if=none,format=raw,{options},file={iso},id=boot-media",
                     "-device", ("ide-cd" if media == "sata-optical" else "ide-hd") + ",drive=boot-media,bus=boot-sata.0,bootindex=1"]
     else:
         raise ValueError("unknown boot media: " + media)
@@ -299,7 +303,7 @@ def speaker_supported(qemu):
             except subprocess.TimeoutExpired: probe.kill(); probe.communicate(timeout=3)
 
 
-def uefi(qemu, iso, out, code, vars_path, timeout, require_audio=False, media="optical", machine="pc", ram=256, uart=True, manifest_path=None):
+def uefi(qemu, iso, out, code, vars_path, timeout, require_audio=False, media="optical", machine="pc", ram=256, uart=True, manifest_path=None, firmware_architecture="X64"):
     fresh_vars = out / "OVMF_VARS.fd"
     shutil.copyfile(vars_path, fresh_vars)
     serial_path = out / "uefi-serial.log"
@@ -396,6 +400,10 @@ def uefi(qemu, iso, out, code, vars_path, timeout, require_audio=False, media="o
             except subprocess.TimeoutExpired: proc.kill(); proc.wait(timeout=3)
     serial = serial_path.read_text(errors="replace") if serial_path.exists() else ""
     checks = [check("UEFI ISO boot exits firmware boot services", "DOS-UEFI: ExitBootServices PASS; entering native Kernel64." in serial),
+              check("Loader executes the expected firmware ABI: " + firmware_architecture,
+                    "DOS-UEFI: firmware ABI=" + firmware_architecture in serial),
+              check("Interactive desktop appears before optional native diagnostics",
+                    0 <= serial.find("SHZGUI INTERACTIVE ready") < serial.find("SHZ-NATIVE-ACCEPT:")),
               check("UEFI ISO starts native Kernel64 without VMX", "started directly by the UEFI boot manager (no Supervisor)" in serial),
               check("UEFI kernel receives GOP framebuffer", "UEFI GOP framebuffer" in serial),
               check("native HELLO64.SD64 completes", "DOS64: HELLO64.SD64 exit=00000000 faulted=0 timeout=0 reaped=0" in serial),
@@ -496,7 +504,9 @@ def main():
             elif name == "uefi-disk": options["media"] = "disk"
             elif name == "uefi-sata": options.update(media="sata-optical", machine="q35")
             elif name == "uefi-no-uart": options["uart"] = False
-            elif name == "uefi-ia32": code, variables = args.ovmf_ia32_code, args.ovmf_ia32_vars
+            elif name == "uefi-ia32":
+                code, variables = args.ovmf_ia32_code, args.ovmf_ia32_vars
+                options["firmware_architecture"] = "IA32"
             profile = uefi(args.qemu, args.iso, destination, code, variables, args.timeout, args.require_audio, **options)
             profile["boot_media"] = options.get("media", "optical")
             profile["firmware_architecture"] = "IA32" if name == "uefi-ia32" else "X64"

@@ -165,10 +165,15 @@ def boot(executable, iso, out, firmware, seconds):
             except (OSError,subprocess.TimeoutExpired,RuntimeError) as exc:
                 error += "\nOwned VM cleanup failed: "+str(exc)
     text = seen()
+    interactive_at = text.find("SHZGUI INTERACTIVE ready")
+    first_acceptance_at = text.find("SHZ-NATIVE-ACCEPT:")
+    expected_abi = "X64" if firmware == "efi64" else "IA32"
     host_diagnostics = error + "\n" + "\n".join(p.read_text(errors="replace") for p in folder.glob("VBox.log*"))
     unavailable = unavailable or bool(CAPABILITY_ERRORS.search(host_diagnostics))
     checks = [check("Actual VirtualBox "+firmware+" DVD boot reaches desktop", "SHZGUI INTERACTIVE ready" in text),
+              check("Firmware uses the requested "+expected_abi+" ABI", "DOS-UEFI: firmware ABI="+expected_abi in text),
               check("EFI ExitBootServices succeeds", "DOS-UEFI: ExitBootServices PASS; entering native Kernel64." in text),
+              check("Desktop is interactive before the first native acceptance result", interactive_at>=0 and first_acceptance_at>interactive_at),
               check("All native mode and application checks pass after interactive F8", "SHZ-NATIVE-ACCEPT: PASS failures=0" in text),
               check("Six real/protected-mode applications succeed", "MODES: completed 6 native application(s), 0 failure(s)" in text),
               check("All 16 long-mode programs complete without failures", "DOS64: completed 16 application(s), 0 failure(s)" in text),

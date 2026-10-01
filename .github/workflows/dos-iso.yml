@@ -35,7 +35,7 @@ jobs:
       - name: Verify native sample fault and timeout containment
         run: python3 samples/dos64/test_runtime.py --qemu /usr/bin/qemu-system-x86_64
       - name: Package source and native application release
-        run: python3 tools/package_release.py
+        run: python3 tools/package_release.py --candidate
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -49,4 +49,8 @@ jobs:
             build/iso-tests/**/*serial.log
             build/iso-tests/**/*.png
             build/iso-tests/**/*.wav
+            build/native/libkurazy64.a
+            build/native/build-result.json
+            build/native/host-test-result.json
+            build/dos64/validation/*
             build/releases/*

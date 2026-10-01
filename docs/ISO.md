@@ -52,6 +52,7 @@ Ubuntu packages provide `ovmf` and `ovmf-ia32`.
 python3 -B tools/build_iso.py
 python3 -B tools/test_iso.py --require-audio
 python3 -B samples/dos64/test_runtime.py
+python3 -B tools/test_virtualbox.py
 python3 -B tools/package_release.py --version 10.0.1
 ```
 
@@ -72,7 +73,11 @@ host disk. Evidence includes logs, screenshots, audio and result JSON.
 `--ovmf-code`, `--ovmf-vars`, `--ovmf-ia32-code` and `--ovmf-ia32-vars` override
 firmware paths. `--profile` selects a focused regression; release packaging
 requires every profile. `--layout-only` proves only the layout. A clean source
-commit and exact tested bytes are required for packaging.
+commit and exact tested bytes are required for packaging. Formal packaging also
+requires actual VirtualBox 7 EFI32 and EFI64 results for the same ISO hash.
+`--virtualbox-evidence` selects downloaded results from the isolated workflow.
+`--candidate` creates an explicitly unpublished candidate before that check;
+its manifest records VirtualBox as NOT_RUN.
 
 `--skip-build` accepts only matching source/binary receipts. Explicit kernel,
 initrd, output and command-line paths are supported. Exploratory

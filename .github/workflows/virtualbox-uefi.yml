@@ -3,11 +3,16 @@ on:
   workflow_dispatch:
     inputs:
       iso_source:
-        description: Test a fresh branch build or the exact published release asset
+        description: Test the exact successful candidate artifact, published asset, or fresh build
         required: true
-        default: build
+        default: artifact
         type: choice
-        options: [build, published]
+        options: [artifact, published, build]
+      candidate_run_id:
+        description: Successful dos-iso.yml run ID when iso_source is artifact
+        required: false
+        default: ''
+        type: string
       release_tag:
         description: Published release tag when iso_source is published
         required: true
@@ -15,6 +20,7 @@ on:
         type: string
 permissions:
   contents: read
+  actions: read
 jobs:
   virtualbox:
     runs-on: ubuntu-24.04
@@ -23,6 +29,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TEST_ISO_SOURCE: ${{ inputs.iso_source }}
       TEST_RELEASE_TAG: ${{ inputs.release_tag }}
+      TEST_CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
     steps:
       - uses: actions/checkout@v4
       # Only this disposable runner installs host packages/drivers. The Python
@@ -81,14 +88,29 @@ jobs:
         continue-on-error: true
         run: |
           test "$GITHUB_ACTIONS" = true
+          lsmod | tee build/virtualbox-tests/host-modules-before.txt
+          ls -l /dev/vboxdrv | tee build/virtualbox-tests/host-device-before.txt
+          sudo chmod a+rw /dev/vboxdrv
           # Recent Linux KVM may reserve VT-x on module load. No other guest is
-          # running in this disposable job; release that competing backend.
-          for module in kvm_intel kvm_amd kvm; do
+          # running in this disposable job; release vendor backends if possible.
+          # Failure remains diagnostic: the actual VM launch must determine
+          # whether VT-x/AMD-V is available. Never stop unrelated host processes.
+          for module in kvm_intel kvm_amd; do
             if lsmod | awk -v name="$module" '$1==name{found=1} END{exit !found}'; then
-              sudo modprobe -r "$module"
+              if ! sudo modprobe -r "$module"; then
+                echo "::warning::Could not unload $module; actual VM launch will check virtualization availability"
+              fi
             fi
           done
-          sudo chmod a+rw /dev/vboxdrv
+          # Oracle documents unloading the vendor module as sufficient. The
+          # base kvm module may legitimately remain in use on the hosted runner.
+          if lsmod | awk '$1=="kvm"{found=1} END{exit !found}'; then
+            if ! sudo modprobe -r kvm; then
+              echo '::warning::Base kvm remains loaded; this is diagnostic, not a guest boot result'
+            fi
+          fi
+          lsmod | tee build/virtualbox-tests/host-modules-after.txt
+          ls -l /dev/vboxdrv | tee build/virtualbox-tests/host-device-after.txt
           VBoxManage --version
       - name: Record actual host capability
         id: host_capability
@@ -109,6 +131,51 @@ jobs:
       - name: Build the genuine default distribution ISO
         if: steps.host_capability.outputs.available == 'true' && inputs.iso_source == 'build'
         run: python3 -B tools/build_iso.py
+      - name: Download and verify the exact successful candidate ISO artifact
+        if: steps.host_capability.outputs.available == 'true' && inputs.iso_source == 'artifact'
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, re, shutil, subprocess
+          from pathlib import Path
+          run_id = os.environ['TEST_CANDIDATE_RUN_ID']
+          repository = os.environ['GITHUB_REPOSITORY']
+          if not re.fullmatch(r'[1-9][0-9]*', run_id):
+              raise SystemExit('artifact input requires an explicit successful candidate_run_id')
+          reply = subprocess.run(['gh', 'api', 'repos/' + repository + '/actions/runs/' + run_id], check=True, capture_output=True, text=True)
+          run = json.loads(reply.stdout)
+          if (run['status'] != 'completed' or run['conclusion'] != 'success'
+                  or run['path'].split('@', 1)[0] != '.github/workflows/dos-iso.yml'
+                  or run['head_repository']['full_name'] != repository):
+              raise SystemExit('Expected a successful same-repository dos-iso.yml candidate run')
+          folder = Path('build/candidate-input')
+          subprocess.run(['gh', 'run', 'download', run_id, '--repo', repository, '--name', 'shizukudos-10-dos-only', '--dir', str(folder)], check=True)
+          manifests = list(folder.rglob('shizukudos-*-manifest.json'))
+          receipts = [path for path in folder.rglob('build-result.json') if path.parent.name == 'iso']
+          if len(manifests) != 1 or len(receipts) != 1:
+              raise SystemExit('Candidate artifact must contain one release manifest and ISO build receipt')
+          manifest = json.loads(manifests[0].read_text())
+          receipt = json.loads(receipts[0].read_text())
+          if manifest['source_commit'] != run['head_sha'] or manifest['iso_acceptance']['status'] != 'PASS':
+              raise SystemExit('Candidate source commit or ISO acceptance does not match successful run')
+          assets = [(name, info) for name, info in manifest['assets'].items() if name.endswith('-dos-only.iso')]
+          if len(assets) != 1:
+              raise SystemExit('Expected one release ISO manifest entry')
+          name, info = assets[0]
+          files = [path for path in folder.rglob('*.iso') if path.name == name]
+          expected = info['sha256']
+          if len(files) != 1 or not re.fullmatch(r'[0-9a-f]{64}', expected):
+              raise SystemExit('Expected the exact candidate release ISO file and SHA-256')
+          source = files[0]
+          actual = hashlib.sha256(source.read_bytes()).hexdigest()
+          if (actual != expected or source.stat().st_size != info['bytes']
+                  or manifest['iso_acceptance']['sha256'] != actual
+                  or receipt['sha256'] != actual or receipt['bytes'] != source.stat().st_size):
+              raise SystemExit('Candidate ISO byte/hash mismatch against manifest or build receipt')
+          output = Path('build/shizukudos-10-dos-only.iso')
+          shutil.copyfile(source, output)
+          Path('build/virtualbox-tests/candidate-input.json').write_text(json.dumps({'run_id': run_id, 'run_url': run['html_url'], 'source_commit': run['head_sha'], 'tester_commit': os.environ['GITHUB_SHA'], 'asset': name, 'sha256': actual, 'bytes': source.stat().st_size, 'manifest': str(manifests[0]), 'release_state': manifest.get('release_state', 'release')}, indent=2) + '\n')
+          print('Testing exact candidate ISO ' + name + ' SHA-256 ' + actual)
+          PY
       - name: Download and verify exact published ISO asset
         if: steps.host_capability.outputs.available == 'true' && inputs.iso_source == 'published'
         run: |
@@ -156,7 +223,10 @@ jobs:
           path: |
             build/virtualbox-tests/result.json
             build/virtualbox-tests/published-input.json
+            build/virtualbox-tests/candidate-input.json
             build/virtualbox-tests/host-package.json
+            build/virtualbox-tests/host-modules-*.txt
+            build/virtualbox-tests/host-device-*.txt
             build/virtualbox-tests/*/result.json
             build/virtualbox-tests/*/serial.log
             build/virtualbox-tests/*/commands.jsonl

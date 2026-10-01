@@ -32,6 +32,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--version", default="10.0.1")
     ap.add_argument("--out", type=Path, default=ROOT / "build" / "releases")
+    ap.add_argument("--candidate", action="store_true", help="package an unpublished QEMU candidate before VirtualBox validation")
+    ap.add_argument("--virtualbox-evidence", type=Path, default=ROOT / "build" / "virtualbox-tests")
     args = ap.parse_args()
     if not re.fullmatch(r"[0-9][0-9A-Za-z.-]*", args.version):
         raise SystemExit("invalid release version")
@@ -50,6 +52,21 @@ def main():
             or any(profiles[name].get("audio", {}).get("signal_verified") is not True for name in required_profiles if name != "bios")
             or not all(c.get("status") == "PASS" for c in profile_checks)):
         raise SystemExit("release refused: ISO acceptance did not pass for these exact ISO bytes")
+    virtualbox = {"status": "NOT_RUN"}
+    if not args.candidate:
+        vb_path = args.virtualbox_evidence.resolve() / "result.json"
+        virtualbox = json.loads(vb_path.read_text())
+        vb_profiles = virtualbox.get("profiles", {})
+        if (virtualbox.get("schema") != "shizukudos.virtualbox.v1"
+                or virtualbox.get("status") != "PASS"
+                or virtualbox.get("iso_sha256") != digest(iso)
+                or virtualbox.get("host", {}).get("status") != "AVAILABLE"
+                or not re.match(r"7\.", virtualbox.get("host", {}).get("version", ""))
+                or set(vb_profiles) != {"efi32", "efi64"}
+                or any(p.get("status") != "PASS" or not p.get("checks")
+                       or any(c.get("status") != "PASS" for c in p["checks"])
+                       for p in vb_profiles.values())):
+            raise SystemExit("release refused: actual VirtualBox EFI32/EFI64 acceptance did not pass for these exact ISO bytes")
     commit = git("rev-parse", "HEAD").decode().strip()
     epoch = int(git("show", "-s", "--format=%ct", "HEAD"))
     tracked = [p.decode() for p in git("ls-files", "-z").split(b"\0") if p]
@@ -99,13 +116,17 @@ def main():
     with tarfile.open(fileobj=stream, mode="w") as tf:
         evidence_paths = [ROOT / "build" / "iso-tests", ROOT / "build" / "native" / "validation", ROOT / "build" / "native" / "host-test-result.json",
                           ROOT / "build" / "dos64" / "validation", ROOT / "build" / "modes" / "validation"]
+        if not args.candidate:
+            evidence_paths.append(args.virtualbox_evidence.resolve())
         for base in evidence_paths:
             if not base.exists():
                 continue
             for path in [base] if base.is_file() else sorted(base.rglob("*")):
-                if not path.is_file() or path.suffix not in (".json", ".log", ".txt", ".png", ".wav"):
+                if not path.is_file() or path.suffix not in (".json", ".jsonl", ".log", ".txt", ".png", ".wav"):
                     continue
-                rel = path.relative_to(ROOT / "build")
+                rel = (Path("virtualbox-tests") / path.relative_to(args.virtualbox_evidence.resolve())
+                       if not args.candidate and path.is_relative_to(args.virtualbox_evidence.resolve())
+                       else path.relative_to(ROOT / "build"))
                 info = tf.gettarinfo(str(path), str(rel))
                 info.uid = info.gid = 0
                 info.uname = info.gname = ""
@@ -118,8 +139,13 @@ def main():
     manifest.write_text(json.dumps({"schema": "shizukudos.release.v1", "version": args.version,
                                    "repository": "https://github.com/NiSeullent/ShizukuDOS",
                                    "source_commit": commit,
+                                   "release_state": "candidate" if args.candidate else "verified",
                                    "upstream": json.loads((ROOT / "SOURCE_ORIGIN.json").read_text())["upstream_commit"],
                                    "iso_acceptance": {"status": result["status"], "sha256": digest(iso)},
+                                   "virtualbox_acceptance": {"status": virtualbox["status"],
+                                       "sha256": virtualbox.get("iso_sha256"),
+                                       "version": virtualbox.get("host", {}).get("version"),
+                                       "profiles": {k: v["status"] for k, v in virtualbox.get("profiles", {}).items()}},
                                    "source_files_sha256": source_hashes,
                                    "assets": {p.name: {"bytes": p.stat().st_size, "sha256": digest(p)} for p in assets}},
                                   indent=2) + "\n")

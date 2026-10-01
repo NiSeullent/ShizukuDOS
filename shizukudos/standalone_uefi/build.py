@@ -60,7 +60,7 @@ def build(kernel, initrd, output, cmdline="shz.dos64=1", architecture="x64"):
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--kernel", type=Path, default=REPO / "build/shizukudos/kernel64s/KERNEL64S.BIN")
-    p.add_argument("--initrd", type=Path, default=REPO / "build/dos64/DOS64.IMG")
+    p.add_argument("--initrd", type=Path, default=REPO / "build/native/DOS64.IMG")
     p.add_argument("--out", type=Path, default=REPO / "build/standalone-uefi/BOOTX64.EFI")
     p.add_argument("--cmdline", default="shz.dos64=1")
     p.add_argument("--arch", choices=("x64", "ia32"), default="x64")

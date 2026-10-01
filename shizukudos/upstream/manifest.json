@@ -1,0 +1,476 @@
+{
+  "schema": 1,
+  "product": "ShizukuDOS 10.0-dev",
+  "policy": "Upstream trees are fetched at the pinned commit into build/upstream (ignored by git). Local changes are only carried as patches under the consuming component's patches/ directory. Nothing listed here is an original Shizuku implementation.",
+  "upstreams": {
+    "freedos-kernel": {
+      "repository": "https://github.com/FDOS/kernel.git",
+      "ref": "ke2046",
+      "commit": "5ffb5502d39a10a30f5b8a9e8beeba0bf30245d3",
+      "submodules": {
+        "country": {"repository": "https://github.com/FDOS/country.git", "commit": "7f83e041d00f78b3912c761246930f3b437440f6"},
+        "share": {"repository": "https://github.com/FDOS/share.git", "commit": "47f3d42527256fa46a00fe84cdb46d90f2e66f50"}
+      },
+      "license": "GPL-2.0-or-later",
+      "license_files": ["COPYING"],
+      "execution_mode": "real-mode 16-bit (i8086/i386 instruction set, FAT12/16/32); not a protected-mode kernel",
+      "used_by": ["shizukudos/dos16"],
+      "build": "Open Watcom + NASM via `make all XCPU=386 XFAT=32` (mkfiles/owlinux.mak)",
+      "patches": ["shizukudos/dos16/patches/0001-shizukudos-branding.patch",
+                  "shizukudos/dos16/patches/0002-reproducible-build-date.patch"]
+    },
+    "freedos-freecom": {
+      "repository": "https://github.com/FDOS/freecom.git",
+      "ref": "master",
+      "commit": "04fc21a9f6792abe9048598e8f2d048b4f6cd0e5",
+      "license": "GPL-2.0-or-later",
+      "license_files": ["license/*"],
+      "execution_mode": "real-mode 16-bit COMMAND.COM",
+      "used_by": ["shizukudos/dos16"],
+      "build": "Open Watcom + NASM via `build.sh` (XMS swap enabled, language english)",
+      "patches": ["shizukudos/dos16/patches/freecom-0001-reproducible-build-stamp.patch"]
+    },
+    "csmwrap": {
+      "repository": "https://github.com/CSMWrap/CSMWrap.git",
+      "ref": "main",
+      "commit": "7f30b740c352ee952eb596bf10ae263a8a5da4c7",
+      "submodules": {
+        "seabios": {"repository": "https://github.com/CSMWrap/seabios-csmwrap.git",
+                    "commit": "578d260b94f62150bf6ab9149784287bd1154f06",
+                    "license": "LGPL-3.0-only", "license_files": ["seabios/COPYING.LESSER", "seabios/COPYING"],
+                    "note": "SeaBIOS CSM build (Csm16.bin) and SeaVGABIOS (vgabios.bin), linked into the EFI image as byte arrays. Source headers: 'distributed under the terms of the GNU LGPLv3 license'; build scripts (not in the binary) are GPLv3."},
+        "picoefi": {"repository": "https://github.com/PicoEFI/PicoEFI.git",
+                    "commit": "af14129ec21ba482873289e36311ec02f1e19964",
+                    "license": "BSD-2-Clause AND BSD-2-Clause-Patent AND BSD-3-Clause AND MIT AND LicenseRef-scancode-bsd-no-disclaimer-unmodified",
+                    "license_files": ["picoefi/COPYING", "picoefi/LICENSES/*"]},
+        "uACPI": {"repository": "https://github.com/uACPI/uACPI.git",
+                  "commit": "338dc389ef38c5264e317c61d8121aace5ac865d",
+                  "license": "MIT", "license_files": ["uACPI/LICENSE"]},
+        "flanterm": {"repository": "https://github.com/Mintsuki/Flanterm.git",
+                     "commit": "dfa1922c0749faf64c4423a81b233a20c08a7db7",
+                     "license": "BSD-2-Clause", "license_files": ["flanterm/LICENSE"]},
+        "nanoprintf": {"repository": "https://github.com/charlesnicholson/nanoprintf.git",
+                       "commit": "526cbca59d23fcb4e4aee3a93beaf22bc63e67a5",
+                       "license": "Unlicense OR 0BSD", "license_files": ["nanoprintf/LICENSE"]},
+        "cc-runtime": {"repository": "https://github.com/osdev0/cc-runtime.git",
+                       "commit": "dae79833b57a01b9fd3e359ee31def69f5ae899b",
+                       "license": "Apache-2.0 WITH LLVM-exception", "license_files": ["cc-runtime/LICENSE.TXT"]},
+        "freestnd-c-hdrs": {"repository": "https://github.com/osdev0/freestnd-c-hdrs-0bsd.git",
+                            "commit": "097259a899d30f0a4b7a694de2de5fdda942e923",
+                            "license": "0BSD", "license_files": ["freestnd-c-hdrs/LICENSE"]}
+      },
+      "license": "LGPL-2.1-only",
+      "license_files": ["LICENSE"],
+      "license_note": "CSMWrap's own code is LGPL-2.1 (LICENSE). Files under src/edk2 carry SPDX BSD-2-Clause-Patent headers (TianoCore EDK2). Each submodule keeps its own license (see submodules).",
+      "execution_mode": "UEFI x86-64 application: exits boot services, installs SeaBIOS CSM16 below 1 MiB and legacy-boots the MBR of the disk it was loaded from; a BIOS proxy runs on one reserved AP",
+      "used_by": ["shizukudos/csm", "shizukudos/dos16 (dual BIOS/UEFI image)"],
+      "build": "GNU make + gcc + nasm + xxd via `make BUILD_VERSION=<build_version> all` in a .git-free copy (shizukudos/csm/build.py)",
+      "build_version": "3.1.2-25-g7f30b74",
+      "seabios_version": "578d260b",
+      "version_note": "Fixed copies of what `git describe --tags --always` printed for the pinned commits (CSMWrap) and `git describe --always --tags --long` (seabios submodule, no tags fetched) on 2026-09-29; fixed so later upstream tags cannot change the binary.",
+      "patches": []
+    },
+    "syslinux": {
+      "kind": "debian-binary-packages",
+      "repository": "https://git.kernel.org/pub/scm/boot/syslinux/syslinux.git",
+      "ref": "6.04-pre (Debian/Ubuntu snapshot git20190206)",
+      "commit": "bf6db5b4",
+      "commit_note": "Abbreviated upstream commit as recorded in the Debian version string; the pin that is checked is the sha256 of every package and source file below.",
+      "distribution": "Ubuntu 24.04 (noble) package version 3:6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3",
+      "license": "GPL-2.0-or-later",
+      "license_note": "Syslinux core, isolinux.bin, ldlinux.c32 and memdisk are GPL-2.0-or-later; most com32 modules (menu.c32, mboot.c32, libcom32.c32, libutil.c32) are MIT (Expat) with some GPL-2.0-or-later files. Full per-file terms: usr/share/doc/syslinux-common/copyright, shipped with the media.",
+      "license_files": [
+        "usr/share/doc/syslinux-common/copyright",
+        "usr/share/doc/isolinux/copyright",
+        "usr/share/doc/syslinux/copyright"
+      ],
+      "packages": {
+        "isolinux": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/universe/s/syslinux/isolinux_6.04%7egit20190206.bf6db5b4%2bdfsg1-3ubuntu3_all.deb",
+          "file": "isolinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3_all.deb",
+          "sha256": "fb7fd5b063ba76be09a7b4b9eecb7ac4637434892639b8f315db7a696d70a722"
+        },
+        "syslinux-common": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/main/s/syslinux/syslinux-common_6.04%7egit20190206.bf6db5b4%2bdfsg1-3ubuntu3_all.deb",
+          "file": "syslinux-common_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3_all.deb",
+          "sha256": "0861814acc911f788b65689ae59509bafaf20098e68e25de87a2a27ecc3d3169"
+        },
+        "syslinux": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/universe/s/syslinux/syslinux_6.04%7egit20190206.bf6db5b4%2bdfsg1-3ubuntu3_amd64.deb",
+          "file": "syslinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3_amd64.deb",
+          "sha256": "7406f58e3998ea38e0e8364692f6f15c35484f190aeb4726fb73adf8a87667d7",
+          "note": "host tool only: the mtools-based FAT installer used by tools/build_shizuku_se_disk.py; not shipped"
+        }
+      },
+      "source": {
+        "dsc": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/main/s/syslinux/syslinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3.dsc",
+          "file": "syslinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3.dsc",
+          "sha256": "7f20f9b25712baac071eb62f184b443b7a2f78cfea28b1c391bc882b4769e99b"
+        },
+        "orig": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/main/s/syslinux/syslinux_6.04~git20190206.bf6db5b4+dfsg1.orig.tar.xz",
+          "file": "syslinux_6.04~git20190206.bf6db5b4+dfsg1.orig.tar.xz",
+          "sha256": "46169f43dabb5f6cb33a3f6fb79a61008179326756481845c0a42d429d0c5bee"
+        },
+        "debian": {
+          "url": "http://archive.ubuntu.com/ubuntu/pool/main/s/syslinux/syslinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3.debian.tar.xz",
+          "file": "syslinux_6.04~git20190206.bf6db5b4+dfsg1-3ubuntu3.debian.tar.xz",
+          "sha256": "1ba18a5bf5aaec57eff55905aa06e878622966f7bf1d12afc3f3713dfe7f5a42"
+        }
+      },
+      "files": {
+        "usr/lib/ISOLINUX/isolinux.bin": "f0f645e52bbe18bf7a4ac07be9afa985e21d8eb8c9c57938bdaf5b868a0e0e7f",
+        "usr/lib/ISOLINUX/isohdpfx.bin": "7b43a4dd2061e95da55af51d57a2385c257d64444ee2a62264bcf634a1d0945b",
+        "usr/lib/syslinux/modules/bios/ldlinux.c32": "714faf7d286cd9d47c045c9e8dc614b509b1babc3bb39c095922974a0a62dddf",
+        "usr/lib/syslinux/modules/bios/libcom32.c32": "591db797691f4704a492d036dc70d3595d022fb49bcace8585b75c0c0680b101",
+        "usr/lib/syslinux/modules/bios/libutil.c32": "293877c867ec6af7f05261cbbfbfd031e6f71e809e31b44cf7755b721b9caa94",
+        "usr/lib/syslinux/modules/bios/menu.c32": "9b32ddeb8d69d5c630b64319510fd4e28948c8bc72bafe0a8f29ed9eb549c27c",
+        "usr/lib/syslinux/modules/bios/mboot.c32": "835546f48a6483675a0339f7f6cbc08fe44c028c060edd1fc5e05940870c79a1",
+        "usr/lib/syslinux/memdisk": "e60be7c7da33d6a938a016d8b1537ea29b11d0afc685217eb9ab4bac478d3623",
+        "usr/lib/syslinux/mbr/mbr.bin": "4746f74bc9b9d3d579c41988a4a29bb7ac932ad1c70470ea779ea161eb799b64",
+        "usr/bin/syslinux": "a32eba063251cfc4858a0da6922a613bdc1bceb9ca1309aa85c7e838c58951e7"
+      },
+      "execution_mode": "legacy BIOS boot loaders: isolinux.bin (El Torito no-emulation, and through isohdpfx.bin when the ISO is written to a disk), syslinux ldlinux.sys on the raw disk's FAT partition; mboot.c32 loads the Kernel64 Multiboot stub, memdisk emulates a BIOS disk from a disk/floppy image in RAM",
+      "used_by": [
+        "tools/build_shizuku_se_iso.py",
+        "tools/build_shizuku_se_disk.py"
+      ],
+      "build": "not built here: the pinned distribution binaries are extracted with dpkg-deb -x (shizukudos/tools/shzlib.py ensure_deb_upstream); the Debian source package (dsc + orig + debian tarballs) is shipped on the media as corresponding source"
+    },
+    "reactos": {
+      "repository": "https://github.com/reactos/reactos.git",
+      "ref": "master",
+      "commit": "f06eace89e11b6513afcf65b653f2d360db7ba77",
+      "license": "GPL-2.0 (COPYING is the GPLv2 text; the corpus driver sources state GPL-2.0+ or 'GPL - See COPYING'). Third-party components used by the corpus, per media/doc/3rd Party Files.txt: MS-PL (drivers/storage/class/classpnp, disk, cdrom), MIT (sdk/lib/drivers/wdf = Microsoft WDF), BSD-3-Clause (drivers/network/dd/netkvm), BSD (drivers/bus/pcix, COPYING.ARM), UniATA BSD-style licence (drivers/storage/ide/uniata)",
+      "license_files": ["COPYING", "COPYING.LIB"],
+      "execution_mode": "NT kernel-mode driver sources (x64 WDM), compiled unmodified as the NT driver corpus",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "shizukudos/ntdrv/corpus/build.py: each driver built from its own CMakeLists.txt (evaluated by the script) with x86_64-w64-mingw32-gcc (C++: x86_64-w64-mingw32-g++ or clang++) against the ReactOS sdk/include headers, ReactOS host tools (hpp, spec2def, pefixup, geninc, asmpp, widl, gcc_plugin_seh) built from this tree, linked --subsystem native with import libraries generated from the ReactOS .spec files (no RosBE, no CMake)",
+      "patches": []
+    },
+    "virtio-win": {
+      "repository": "https://github.com/virtio-win/kvm-guest-drivers-windows.git",
+      "ref": "master",
+      "commit": "04e70e76c966fd9247a523e41c1b6c624e9b46eb",
+      "license": "BSD-3-Clause (LICENSE)",
+      "license_files": ["LICENSE"],
+      "execution_mode": "NT kernel-mode driver sources (NetKVM NDIS 6.x, viostor StorPort, vioinput/viogpudo KMDF/WDM)",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "shizukudos/ntdrv/corpus/build.py + corpus/vcxproj.py: viostor, NetKVM (NDIS 6.85), vioinput (KMDF), viogpudo (WDDM DOD) attempted from their .vcxproj with the ReactOS headers standing in for the WDK; results in docs/shizukudos10/DRIVER_CORPUS.md",
+      "patches": []
+    },
+    "windows-driver-frameworks": {
+      "repository": "https://github.com/microsoft/Windows-Driver-Frameworks.git",
+      "ref": "master",
+      "commit": "b6191d9543441329154da32f7ab9bdd97228dd3c",
+      "license": "MIT (LICENSE)",
+      "license_files": ["LICENSE"],
+      "execution_mode": "KMDF (Wdf01000.sys) and UMDF v2 framework sources; assessed against the copy ReactOS carries (sdk/lib/drivers/wdf, built by the corpus)",
+      "used_by": ["shizukudos/ntdrv/corpus"],
+      "corpus": true,
+      "shallow": true,
+      "build": "not built from this tree (MSBuild/WDK project); the ReactOS copy of the same sources (KMDF 1.17) is built by shizukudos/ntdrv/corpus/build.py (wdf01000, wdfldr); assessment in docs/shizukudos10/DRIVER_CORPUS.md",
+      "patches": []
+    },
+    "wine": {
+      "repository": "https://gitlab.winehq.org/wine/wine.git",
+      "fetch_mirror": "https://github.com/wine-mirror/wine.git",
+      "ref": "wine-11.0",
+      "commit": "db11d0fe6a169c457e23d007e20404643d067aa8",
+      "license": "LGPL-2.1-or-later",
+      "license_files": ["COPYING.LIB", "LICENSE", "AUTHORS"],
+      "bundled_components_used": {
+        "libs/tomcrypt": {"license": "LibTomCrypt dual licence: public domain dedication OR WTFPL-2.0", "license_files": ["libs/tomcrypt/LICENSE"]}
+      },
+      "execution_mode": "PE32+ user-mode DLLs (x86_64) built with mingw-w64 against Wine's own include/ tree; the Unix side (unixlib) of a DLL is never built",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "shizukudos/win64/wineport/build.py: host configure (--enable-win64, every optional library disabled) only for widl/wrc and the generated headers, then each DLL with x86_64-w64-mingw32-gcc; exports come from the .spec file minus stub entries",
+      "linking_note": "The Wine DLLs are statically linked with Shizuku-original GPL-2.0-only support code (wineport/crt, wineport/glue); the combined DLLs are distributed under GPL-2.0 as LGPL-2.1 section 3 permits.",
+      "data_files_used": {
+        "fonts/tahoma.ttf": "Wine's own Tahoma replacement (LGPL-2.1-or-later), packed unmodified as \\SHZ\\FONTS\\tahoma.ttf",
+        "fonts/tahomabd.ttf": "Wine's own Tahoma Bold replacement (LGPL-2.1-or-later), packed unmodified as \\SHZ\\FONTS\\tahomabd.ttf"
+      },
+      "patches": [
+        "shizukudos/win64/wineport/patches/wine/0001-cryptbase-system-rng-and-memory-encryption.patch",
+        "shizukudos/win64/wineport/patches/wine/0002-crypt32-shizuku.patch",
+        "shizukudos/win64/wineport/patches/wine/0003-advapi32-crypt-register-default-csp-on-first-use.patch",
+        "shizukudos/win64/wineport/patches/wine/0004-dwrite-static-freetype-and-font-registration.patch",
+        "shizukudos/win64/wineport/patches/wine/0005-winecrt0-debug-options-from-registry.patch",
+        "shizukudos/win64/wineport/patches/wine/0006-wintrust-register-providers-on-first-use.patch",
+        "shizukudos/win64/wineport/patches/wine/0007-dwmapi-no-compositor-explicit-failure.patch"
+      ]
+    },
+    "freetype": {
+      "repository": "https://gitlab.freedesktop.org/freetype/freetype.git",
+      "fetch_mirror": "https://github.com/freetype/freetype.git",
+      "ref": "VER-2-13-3",
+      "commit": "42608f77f20749dd6ddc9e0536788eaad70ea4b5",
+      "license": "FTL OR GPL-2.0-or-later (dual); used here under GPL-2.0-or-later",
+      "license_files": ["LICENSE.TXT", "docs/FTL.TXT", "docs/GPLv2.TXT"],
+      "execution_mode": "static library linked into the PE dwrite.dll (x86_64, mingw-w64), no platform-specific code",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "shizukudos/win64/wineport/build.py: the module sources listed in wineport/modules.json with a module list header (wineport/freetype/shz_ftmodule.h)",
+      "patches": []
+    },
+    "noto-fonts": {
+      "repository": "https://github.com/google/fonts.git",
+      "ref": "main",
+      "commit": "23e54b51ddffbc7713c583748e3bd86f62b1fa4a",
+      "sparse_paths": ["/ofl/notosans/", "/ofl/notoserif/", "/ofl/notosansmono/"],
+      "license": "OFL-1.1",
+      "license_files": ["ofl/notosans/OFL.txt", "ofl/notoserif/OFL.txt", "ofl/notosansmono/OFL.txt"],
+      "execution_mode": "font data (variable TrueType), packed unmodified into WIN64.IMG as \\SHZ\\FONTS\\*.ttf",
+      "used_by": ["shizukudos/win64/wineport"],
+      "build": "partial, sparse fetch of the pinned commit (only the three family directories); files are not modified",
+      "patches": []
+    },
+    "mingw-w64": {
+      "repository": "https://github.com/mingw-w64/mingw-w64.git",
+      "ref": "v13.0.0",
+      "commit": "de62c283f3383bd825c98518cb0a42ba071d4ac2",
+      "license": "ZPL-2.1 AND MIT AND LGPL-2.1-or-later AND public-domain (per-directory, see COPYING.MinGW-w64 and COPYING.MinGW-w64-runtime)",
+      "license_files": ["COPYING", "COPYING.MinGW-w64/COPYING.MinGW-w64.txt", "COPYING.MinGW-w64-runtime/COPYING.MinGW-w64-runtime.txt"],
+      "execution_mode": "C runtime startup objects, libmingwex and import libraries linked into the WebKit dependency and port images (UCRT flavour: the C runtime is imported from the api-ms-win-crt contracts)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/toolchain.py: mingw-w64-headers and mingw-w64-crt with --with-default-msvcrt=ucrt, compiled by the host clang for x86_64-w64-mingw32 (provisional toolchain until agent W1's)",
+      "patches": []
+    },
+    "llvm-project-runtimes": {
+      "repository": "https://github.com/llvm/llvm-project.git",
+      "ref": "llvmorg-18.1.3",
+      "commit": "c13b7485b87909fcf739f62cfa382b55407433c0",
+      "sparse_paths": ["/compiler-rt/", "/libunwind/", "/libcxx/", "/libcxxabi/", "/runtimes/", "/cmake/", "/llvm/cmake/", "/llvm/utils/llvm-lit/", "/llvm/utils/lit/", "/third-party/"],
+      "license": "Apache-2.0 WITH LLVM-exception",
+      "license_files": ["libcxx/LICENSE.TXT", "libcxxabi/LICENSE.TXT", "libunwind/LICENSE.TXT", "compiler-rt/LICENSE.TXT"],
+      "execution_mode": "compiler-rt builtins, libunwind, libc++abi, libc++ for x86_64-w64-mingw32 (libc++.dll and libunwind.dll are shipped next to the WebKit images)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/toolchain.py: the same LLVM release as the host clang 18.1.3; runtimes build with win32 threads (provisional toolchain until agent W1's)",
+      "patches": []
+    },
+    "zlib": {
+      "repository": "https://github.com/madler/zlib.git",
+      "ref": "v1.3.1",
+      "commit": "51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf",
+      "license": "Zlib",
+      "license_files": ["LICENSE"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: zlib1 DLL (libzlib.dll)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: CMake (agent W3)",
+      "patches": []
+    },
+    "libpng": {
+      "repository": "https://github.com/pnggroup/libpng.git",
+      "ref": "v1.6.50",
+      "commit": "2b978915d82377df13fcbb1fb56660195ded868a",
+      "license": "libpng-2.0",
+      "license_files": ["LICENSE"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libpng16.dll",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: CMake, tests and tools off (agent W3)",
+      "patches": []
+    },
+    "libjpeg-turbo": {
+      "repository": "https://github.com/libjpeg-turbo/libjpeg-turbo.git",
+      "ref": "3.1.2",
+      "commit": "4e151a4ad91001b3aa8c2ece2205c15f487ce320",
+      "license": "IJG AND BSD-3-Clause AND Zlib",
+      "license_files": ["LICENSE.md", "README.ijg"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libjpeg-62.dll and libturbojpeg.dll (NASM SIMD)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: CMake (agent W3)",
+      "patches": []
+    },
+    "libwebp": {
+      "repository": "https://github.com/webmproject/libwebp.git",
+      "ref": "v1.6.0",
+      "commit": "4fa21912338357f89e4fd51cf2368325b59e9bd9",
+      "license": "BSD-3-Clause",
+      "license_files": ["COPYING", "PATENTS"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libwebp, libwebpdemux, libsharpyuv DLLs",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: CMake, tools off (agent W3)",
+      "patches": []
+    },
+    "brotli": {
+      "repository": "https://github.com/google/brotli.git",
+      "ref": "v1.1.0",
+      "commit": "ed738e842d2fbdf2d6459e39267a633c4a9b2f5d",
+      "license": "MIT",
+      "license_files": ["LICENSE"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libbrotlicommon/dec/enc DLLs (WOFF2 and curl content decoding)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: CMake (agent W3)",
+      "patches": []
+    },
+    "woff2": {
+      "repository": "https://github.com/google/woff2.git",
+      "ref": "v1.0.2",
+      "commit": "1bccf208bca986e53a647dfe4811322adb06ecf8",
+      "license": "MIT",
+      "license_files": ["LICENSE"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libwoff2common/dec/enc DLLs (C++)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: CMake (agent W3)",
+      "patches": []
+    },
+    "sqlite": {
+      "repository": "https://github.com/sqlite/sqlite.git",
+      "ref": "version-3.50.4",
+      "commit": "8ed5e7365e6f12f427910188bbf6b254daad2ef6",
+      "license": "blessing (public domain)",
+      "license_files": ["LICENSE.md"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libsqlite3-0.dll from the amalgamation (FTS3, RTREE, JSON)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: host configure + make sqlite3.c (tclsh), then one translation unit (agent W3)",
+      "patches": []
+    },
+    "libxml2": {
+      "repository": "https://github.com/GNOME/libxml2.git",
+      "ref": "v2.14.6",
+      "commit": "d23960a130c5bb82779c9405fbbf85e65fb3c57c",
+      "license": "MIT",
+      "license_files": ["Copyright"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libxml2.dll",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: CMake; no iconv, ICU, lzma, zlib, python (agent W3)",
+      "patches": []
+    },
+    "libxslt": {
+      "repository": "https://github.com/GNOME/libxslt.git",
+      "ref": "v1.1.43",
+      "commit": "71be7a32637760d769b193d95e0c745ecb86b679",
+      "license": "MIT",
+      "license_files": ["COPYING", "Copyright"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libxslt.dll and libexslt.dll",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: CMake (agent W3)",
+      "patches": []
+    },
+    "icu": {
+      "repository": "https://github.com/unicode-org/icu.git",
+      "ref": "release-77-1",
+      "commit": "457157a92aa053e632cc7fcfd0e12f8a943b2d11",
+      "license": "Unicode-3.0 AND ICU",
+      "license_files": ["icu4c/LICENSE"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: icuuc77/icuin77/icudt77 DLLs (data as a library)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: icu4c/source configure: host build for the data tools, then --host=x86_64-w64-mingw32 --with-cross-build (agent W3)",
+      "patches": []
+    },
+    "harfbuzz": {
+      "repository": "https://github.com/harfbuzz/harfbuzz.git",
+      "ref": "11.5.1",
+      "commit": "7497c4147469fd4102a7229222586ad5c743c5a1",
+      "license": "MIT-Modern-Variant",
+      "license_files": ["COPYING"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libharfbuzz-0.dll and libharfbuzz-icu-0.dll (C++)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: meson cross build, ICU and FreeType on, glib/cairo off (agent W3)",
+      "patches": []
+    },
+    "freetype-webkit": {
+      "repository": "https://github.com/freetype/freetype.git",
+      "ref": "VER-2-14-1",
+      "commit": "526ec5c47b9ebccc4754c85ac0c0cdf7c85a5e9b",
+      "license": "FTL OR GPL-2.0-or-later (dual); used here under GPL-2.0-or-later",
+      "license_files": ["LICENSE.TXT", "docs/GPLv2.TXT", "docs/FTL.TXT"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libfreetype-6.dll for Skia's FreeType font manager (separate from the wineport's static FreeType)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: CMake with zlib and libpng (agent W3)",
+      "patches": []
+    },
+    "openssl": {
+      "repository": "https://github.com/openssl/openssl.git",
+      "ref": "openssl-3.5.4",
+      "commit": "c1eeb9406b6142148f267594197d853403d10208",
+      "license": "Apache-2.0",
+      "license_files": ["LICENSE.txt"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libcrypto-3-x64.dll and libssl-3-x64.dll (TLS for curl and WebCore's USE_OPENSSL)",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: perl Configure mingw64 shared no-tests no-docs (agent W3)",
+      "patches": []
+    },
+    "curl": {
+      "repository": "https://github.com/curl/curl.git",
+      "ref": "curl-8_16_0",
+      "commit": "11b991232fbcaa88e2b1faecac224416b0001e35",
+      "license": "curl",
+      "license_files": ["COPYING"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libcurl.dll over the Shizuku ws2_32 with OpenSSL, zlib, brotli",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: CMake, curl.exe and tests off (agent W3)",
+      "patches": []
+    },
+    "libpsl": {
+      "repository": "https://github.com/rockdaboot/libpsl.git",
+      "ref": "0.21.5",
+      "commit": "ba4c49a205408845834b1648ad23c15ee09f722b",
+      "license": "MIT",
+      "license_files": ["COPYING"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: libpsl-5.dll with the built-in list",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: meson cross build, -Dbuiltin=true -Druntime=no, psl_file from publicsuffix-list (agent W3)",
+      "patches": []
+    },
+    "publicsuffix-list": {
+      "repository": "https://github.com/publicsuffix/list.git",
+      "ref": "main",
+      "commit": "a179a48c465e818cfd8d626691cb317985da87fb",
+      "license": "MPL-2.0",
+      "license_files": ["LICENSE"],
+      "execution_mode": "PE32+ DLL for the Kernel64 Win64 runtime: public_suffix_list.dat compiled into libpsl",
+      "used_by": ["shizukudos/win64/webkit/deps"],
+      "build": "shizukudos/win64/webkit/deps/build.py: data only (agent W3)",
+      "patches": []
+    },
+    "webkit": {
+      "repository": "https://github.com/WebKit/WebKit.git",
+      "ref": "main",
+      "commit": "5c289247285a71147ba4e7fd213394d68dc44da9",
+      "sparse_paths": ["/*", "!/*/", "/Source/CMakeLists.txt", "/Source/cmake/", "/Source/WTF/", "/Source/JavaScriptCore/",
+                       "/Source/bmalloc/", "/Tools/Scripts/*", "!/Tools/Scripts/*/", "/JSTests/stress/"],
+      "license": "BSD-2-Clause AND BSD-3-Clause AND LGPL-2.0-or-later AND LGPL-2.1-or-later AND (MPL-1.1 OR GPL-2.0-or-later OR LGPL-2.1-or-later) AND ISC AND MIT AND Apache-2.0 AND BSL-1.0 AND Unicode-3.0",
+      "license_detail": "Per file, from the pinned tree (shizukudos/win64/webkit/licscan.py; counts in docs/shizukudos10/WEBKIT.md): WTF 698 BSD-2-Clause, 80 BSD-3-Clause, 97 LGPL-2.0-or-later, 1 LGPL-2.1-or-later+BSD-3-Clause (DateMath.cpp), 4 MPL-1.1/GPL-2.0/LGPL-2.1 tri-licence (DateMath.h and relatives), 197 ICU headers (Unicode-3.0), and small third-party files (fast_float Apache-2.0/MIT/BSL-1.0, dragonbox Apache-2.0 WITH LLVM-exception or BSL-1.0, simde MIT, CryptographicallyRandomNumber ISC); JavaScriptCore 3266 BSD-2-Clause, 103 BSD-3-Clause, 188 LGPL-2.0-or-later, 1 LGPL-2.1-or-later+BSD-3-Clause (JSDateMath.cpp), a few MIT/ISC files; bmalloc 622 BSD-2-Clause, 5 BSD-3-Clause, 1 ISC, mimalloc MIT (built: bmalloc on Windows requires mimalloc). The LGPL-2.0-or-later files (KDE heritage: lexer, parser, runtime objects, HashTable) make the built JavaScriptCore library LGPL-2.0-or-later as a whole.",
+      "license_files": ["Source/JavaScriptCore/COPYING.LIB", "Source/WTF/LICENSE-LLVM.txt", "Source/WTF/LICENSE-dragonbox.txt",
+                        "Source/WTF/LICENSE-libc++.txt", "Source/WTF/LICENSE-simde.txt", "Source/WTF/icu/LICENSE",
+                        "Source/WTF/wtf/fast_float/LICENSE", "Source/WTF/wtf/simdutf/LICENSE-simdutf.txt",
+                        "Source/WTF/wtf/dtoa/COPYING", "Source/WTF/wtf/dtoa/LICENSE"],
+      "execution_mode": "Win64 user mode on Kernel64: jsc.exe + JavaScriptCore.dll (WTF and bmalloc linked in), PORT=JSCOnly",
+      "used_by": ["shizukudos/win64/webkit"],
+      "build": "partial, sparse fetch of the pinned commit; CMake + Ninja, clang --target=x86_64-w64-windows-gnu (shizukudos/win64/webkit/build.py, docs/shizukudos10/WEBKIT.md)",
+      "fetched_by": "shizukudos/win64/webkit/build.py",
+      "patches": ["shizukudos/win64/webkit/patches/0001-mingw-clang-portability.patch"]
+    }
+  },
+  "tools": {
+    "open-watcom-v2": {
+      "kind": "toolchain (not redistributed)",
+      "url": "https://github.com/open-watcom/open-watcom-v2/releases/download/Last-CI-build/ow-snapshot.tar.xz",
+      "sha256": "01f690d058c26ee5ba6730661ca56bbbfd401ac856af3fc0f4f2e0e626ed0063",
+      "note": "Rolling CI tag: upstream replaces the archive with every CI build (twice within hours on 2026-09-29/30). sha256 is the snapshot the last full verification used (2026-09-29, host suite PASS); a different archive is used with a warning, its hash is recorded in build/tools/ow/.snapshot-sha256 and by the host suite (SKIP with the used hash), and DOS16 reproducibility is compared within each run.",
+      "license": "Sybase Open Watcom Public License 1.0"
+    },
+    "nasm": {"kind": "host tool", "min_version": "2.16"},
+    "mtools": {"kind": "host tool"}
+  },
+  "vendored": {
+    "virglrenderer-headers": {
+      "version": "1.0.0",
+      "archive": "http://archive.ubuntu.com/ubuntu/pool/main/v/virglrenderer/virglrenderer_1.0.0.orig.tar.bz2",
+      "archive_sha256": "b27b9b84c3a9ab62f87152e624914f150c6e582d0798b06d80d91e4a8aab3705",
+      "path": "shizukudos/third_party/virglrenderer-1.0.0",
+      "files": {"virgl_protocol.h": "bf5c4bade0a550cde8b4fb6e0139f15abec19df57151cb65d902d06be9b15dfe",
+                "virgl_hw.h": "ff5489b1803c109e6a39ec018eba8e8bac8282cbc6d712ed7eb65288d1fceb46",
+                "virglrenderer.h": "9a40026e8317d5610abfb8743f6302f8434480183ea53b425d7f08dc0fc437c1",
+                "COPYING": "3b32caf16e2402c2aff2b716858713f3e1feded85c25e71bf829816ee5009402"},
+      "license": "MIT",
+      "used_by": ["shizukudos/kernel64/host/test_virgl_enc.c", "shizukudos/kernel64/host/test_virgl_exec.c"],
+      "note": "Unmodified copies used by host tests only (see PINNED.txt there); never compiled into the guest."
+    }
+  }
+}

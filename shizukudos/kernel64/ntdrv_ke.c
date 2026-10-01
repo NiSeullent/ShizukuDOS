@@ -1,0 +1,640 @@
+/* SPDX-License-Identifier: GPL-2.0-only
+ * Kernel64 NT driver host: the Ke/Ex runtime a driver calls -- IRQL, spin locks, DPCs,
+ * timers, dispatcher objects (events, semaphores, mutexes, timers), waits, delays, the stall
+ * loop, the system clock and pools. Every exported entry is NTAPI (Microsoft x64) so an
+ * unmodified .sys reaches it correctly. Semantics follow WDM; they are backed by the real
+ * Kernel64 scheduler, heap and timebase -- no operation is a no-op stub.
+ *
+ * Uniprocessor model: raising IRQL to >= DISPATCH_LEVEL makes the current thread
+ * non-preemptible (interrupts stay on, but the scheduler will not switch away); DPCs run in a
+ * dedicated dispatch thread and are also flushed whenever IRQL drops below DISPATCH_LEVEL,
+ * matching the point at which Windows drains the DPC queue.
+ */
+#include "ntdrv.h"
+
+#define PASSIVE_LEVEL 0
+#define APC_LEVEL 1
+#define DISPATCH_LEVEL 2
+#define HIGH_LEVEL 15
+
+/* dispatcher header Type byte (ntddk KOBJECTS enum) */
+#define EventNotificationObject 0
+#define EventSynchronizationObject 1
+#define MutantObject 2
+#define SemaphoreObject 5
+#define TimerNotificationObject 8
+#define TimerSynchronizationObject 9
+
+/* The current IRQL IS CR8 (the local APIC task-priority register), exactly as on Windows x64: the DDK's amd64
+ * headers inline KeGetCurrentIrql/KfRaiseIrql/KeLowerIrql as CR8 reads and writes, so an unmodified driver
+ * raises and lowers IRQL without calling any export (ndis.sys carries 85 CR8 instructions). Every provider reads
+ * CR8, and the scheduler (sched.c) does not preempt while CR8 >= DISPATCH_LEVEL and keeps CR8 per thread, which
+ * reproduces the guarantee DISPATCH_LEVEL gives a driver on a uniprocessor (no dispatch-level work interrupts a held
+ * spin lock or a running DPC) whether the driver raised through an export or through CR8 directly.
+ *
+ * Interrupts: the exports mask them only across the transition that crosses DISPATCH_LEVEL (raise from below: cli;
+ * lower to below: sti). A raise or lower that stays on one side of the line leaves EFLAGS.IF alone, so a driver that
+ * raises inline (IF stays on) and then takes a spin lock through an export, or an export used inside an ISR (which
+ * runs with IF off at CR8 >= DISPATCH_LEVEL, see ntdrv_isr_enter), never turns interrupts back on behind the
+ * caller's back. Not modelled: a driver's own CR8 write cannot drain the DPC queue (Windows runs the DPCs when the
+ * write lowers IRQL); the DPC worker thread does it at the next tick, so a driver that lowers inline and polls for
+ * a DPC's effect with a zero timeout can see it a tick late.
+ *
+ * The Supervisor build (no SHZ_STANDALONE) keeps a software IRQL: whether a guest CR8 write reaches the real APIC
+ * task priority there is not something this host can test. */
+#ifdef SHZ_STANDALONE
+static inline uint8_t cur_irql(void) { uint64_t v; __asm__ volatile("mov %%cr8, %0" : "=r"(v)); return (uint8_t)v; }
+static inline void write_irql(uint8_t v) { uint64_t x = v; __asm__ volatile("mov %0, %%cr8" : : "r"(x) : "memory"); }
+#else
+static volatile uint8_t sw_irql;
+static inline uint8_t cur_irql(void) { return sw_irql; }
+static inline void write_irql(uint8_t v) { sw_irql = v; }
+#endif
+#define g_irql (cur_irql())
+
+uint8_t ntdrv_current_irql(void) { return cur_irql(); }
+
+static void set_irql(uint8_t v)
+{
+    const uint8_t old = cur_irql();
+    write_irql(v);
+    if (old < DISPATCH_LEVEL && v >= DISPATCH_LEVEL) cli();
+    else if (old >= DISPATCH_LEVEL && v < DISPATCH_LEVEL) sti();
+}
+
+/* An interrupt service routine (or a KeSynchronizeExecution routine) runs at its DIRQL: above DISPATCH_LEVEL, with
+ * interrupts off. The returned value goes back to ntdrv_isr_leave; IF is not touched (the caller's gate or irq_save
+ * owns it). DIRQL 13 stands for every device interrupt: this host has no interrupt priorities among devices. */
+#define NTDRV_DIRQL 13
+uint8_t ntdrv_isr_enter(void) { const uint8_t o = cur_irql(); write_irql(NTDRV_DIRQL); return o; }
+void ntdrv_isr_leave(uint8_t old) { write_irql(old); }
+
+/* ---------------------------------------------------------------- IRQL */
+uint8_t NTAPI KeGetCurrentIrql(void) { return g_irql; }
+
+void NTAPI KeRaiseIrql(uint8_t new_irql, uint8_t *old)
+{
+    if (new_irql < g_irql) kpanic("KeRaiseIrql lowers IRQL (%u < %u)", new_irql, g_irql);
+    *old = g_irql;
+    set_irql(new_irql);
+}
+uint8_t NTAPI KfRaiseIrql(uint8_t new_irql) { uint8_t o = g_irql; if (new_irql < g_irql) kpanic("KfRaiseIrql lowers IRQL"); set_irql(new_irql); return o; }
+uint8_t NTAPI KeRaiseIrqlToDpcLevel(void) { uint8_t o = g_irql; if (o > DISPATCH_LEVEL) kpanic("raise to DPC from %u", o); set_irql(DISPATCH_LEVEL); return o; }
+uint8_t NTAPI KeRaiseIrqlToSynchLevel(void) { uint8_t o = g_irql; set_irql(DISPATCH_LEVEL); return o; }
+
+void ntdrv_dpc_queue_flush(void);
+void NTAPI KeLowerIrql(uint8_t old)
+{
+    if (old > g_irql) kpanic("KeLowerIrql raises IRQL (%u > %u)", old, g_irql);
+    set_irql(old);
+    if (old < DISPATCH_LEVEL) ntdrv_dpc_queue_flush();
+}
+void NTAPI KfLowerIrql(uint8_t old) { KeLowerIrql(old); }
+
+/* ---------------------------------------------------------------- spin locks (UP) */
+void NTAPI KeInitializeSpinLock(KSPIN_LOCK *l) { *l = 0; }
+
+/* On a uniprocessor a spin lock is IRQL elevation plus a debug-only owned flag. */
+static void spin_acquire(KSPIN_LOCK *l)
+{
+    if (*l) kpanic("KeAcquireSpinLock: already held (deadlock on UP)");
+    *l = 1;
+}
+static void spin_release(KSPIN_LOCK *l) { *l = 0; }
+
+void NTAPI KeAcquireSpinLock(KSPIN_LOCK *l, uint8_t *old) { *old = g_irql; set_irql(DISPATCH_LEVEL); spin_acquire(l); }
+void NTAPI KeReleaseSpinLock(KSPIN_LOCK *l, uint8_t old) { spin_release(l); set_irql(old); if (old < DISPATCH_LEVEL) ntdrv_dpc_queue_flush(); }
+uint8_t NTAPI KfAcquireSpinLock(KSPIN_LOCK *l) { uint8_t o = g_irql; set_irql(DISPATCH_LEVEL); spin_acquire(l); return o; }
+void NTAPI KfReleaseSpinLock(KSPIN_LOCK *l, uint8_t old) { spin_release(l); set_irql(old); if (old < DISPATCH_LEVEL) ntdrv_dpc_queue_flush(); }
+void NTAPI KeAcquireSpinLockAtDpcLevel(KSPIN_LOCK *l) { if (g_irql < DISPATCH_LEVEL) kpanic("AcquireSpinLockAtDpcLevel below DISPATCH (irql %u, caller %p)", g_irql, __builtin_return_address(0)); spin_acquire(l); }
+void NTAPI KeReleaseSpinLockFromDpcLevel(KSPIN_LOCK *l) { spin_release(l); }
+uint8_t NTAPI KeAcquireSpinLockRaiseToDpc(KSPIN_LOCK *l) { uint8_t o = g_irql; set_irql(DISPATCH_LEVEL); spin_acquire(l); return o; }
+
+/* ---------------------------------------------------------------- DPCs */
+static KDPC *dpc_head, *dpc_tail;
+static ksem_t dpc_sem;
+static int ke_ready;
+
+void NTAPI KeInitializeDpc(KDPC *dpc, PKDEFERRED_ROUTINE routine, void *ctx)
+{
+    memset(dpc, 0, sizeof *dpc);
+    dpc->Type = 0x13;                            /* DpcObject */
+    dpc->Number = 0;
+    dpc->DeferredRoutine = routine;
+    dpc->DeferredContext = ctx;
+}
+void NTAPI KeInitializeThreadedDpc(KDPC *dpc, PKDEFERRED_ROUTINE routine, void *ctx) { KeInitializeDpc(dpc, routine, ctx); }
+
+uint8_t NTAPI KeInsertQueueDpc(KDPC *dpc, void *sa1, void *sa2)
+{
+    uint64_t f = irq_save();
+    if (dpc->DpcData) { irq_restore(f); return 0; }             /* already queued */
+    dpc->SystemArgument1 = sa1; dpc->SystemArgument2 = sa2;
+    dpc->DpcData = (void *)1;                                    /* queued marker */
+    dpc->DpcListEntry.Flink = 0;
+    if (dpc_tail) dpc_tail->DpcListEntry.Flink = (LIST_ENTRY *)dpc; else dpc_head = dpc;
+    dpc_tail = dpc;
+    irq_restore(f);
+    if (ke_ready) sem_post(&dpc_sem);
+    return 1;
+}
+uint8_t NTAPI KeRemoveQueueDpc(KDPC *dpc)
+{
+    uint64_t f = irq_save();
+    KDPC **pp = &dpc_head, *prev = 0;
+    while (*pp && *pp != dpc) { prev = *pp; pp = (KDPC **)&(*pp)->DpcListEntry.Flink; }
+    if (!*pp) { irq_restore(f); return 0; }
+    *pp = (KDPC *)dpc->DpcListEntry.Flink;
+    if (dpc_tail == dpc) dpc_tail = prev;
+    dpc->DpcData = 0;
+    irq_restore(f);
+    return 1;
+}
+
+/* Run one pass of the DPC queue at DISPATCH_LEVEL. A DPC is taken off the queue and IRQL is raised with interrupts
+ * still off, so a tick cannot preempt the caller while it holds a DPC that KeRemoveQueueDpc no longer finds queued. */
+void ntdrv_dpc_queue_flush(void)
+{
+    for (;;) {
+        uint64_t f = irq_save();
+        KDPC *dpc = dpc_head;
+        void *sa1, *sa2;
+        uint8_t saved;
+        if (!dpc) { irq_restore(f); return; }
+        dpc_head = (KDPC *)dpc->DpcListEntry.Flink;
+        if (!dpc_head) dpc_tail = 0;
+        dpc->DpcData = 0;
+        sa1 = dpc->SystemArgument1; sa2 = dpc->SystemArgument2;
+        saved = cur_irql();
+        if (saved < DISPATCH_LEVEL) write_irql(DISPATCH_LEVEL);       /* IF stays off until the routine returns, as set_irql would */
+        else irq_restore(f);
+        dpc->DeferredRoutine(dpc, dpc->DeferredContext, sa1, sa2);
+        if (saved < DISPATCH_LEVEL) { write_irql(saved); irq_restore(f); }
+    }
+}
+
+static void dpc_worker(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        sem_wait(&dpc_sem);
+        set_irql(DISPATCH_LEVEL);
+        ntdrv_dpc_queue_flush();
+        set_irql(PASSIVE_LEVEL);
+    }
+}
+
+/* ---------------------------------------------------------------- dispatcher objects */
+static int hdr_signaled(DISPATCHER_HEADER *h)
+{
+    return h->SignalState > 0;
+}
+/* Apply acquire side effects of a satisfied wait. */
+static void hdr_acquire(DISPATCHER_HEADER *h)
+{
+    switch (h->Type) {
+    case EventSynchronizationObject: h->SignalState = 0; break;                 /* auto-reset */
+    case SemaphoreObject: if (h->SignalState > 0) h->SignalState--; break;
+    case TimerSynchronizationObject: h->SignalState = 0; break;
+    case MutantObject: h->SignalState--; break;                                 /* recursive acquire */
+    default: break;                                                             /* notification event/timer stay set */
+    }
+}
+
+void NTAPI KeInitializeEvent(KEVENT *e, uint32_t type, uint8_t state)
+{
+    e->Header.Type = type ? EventSynchronizationObject : EventNotificationObject;   /* SynchronizationEvent=1 */
+    e->Header.SignalState = state ? 1 : 0;
+    e->Header.WaitListHead.Flink = e->Header.WaitListHead.Blink = &e->Header.WaitListHead;
+}
+void NTAPI KeClearEvent(KEVENT *e) { e->Header.SignalState = 0; }
+LONG NTAPI KeResetEvent(KEVENT *e) { LONG p = e->Header.SignalState; e->Header.SignalState = 0; return p; }
+LONG NTAPI KeReadStateEvent(KEVENT *e) { return e->Header.SignalState; }
+LONG NTAPI KeSetEvent(KEVENT *e, LONG boost, uint8_t wait)
+{
+    LONG prev;
+    uint64_t f = irq_save();
+    (void)boost; (void)wait;
+    prev = e->Header.SignalState;
+    e->Header.SignalState = 1;
+    irq_restore(f);
+    return prev;
+}
+
+void NTAPI KeInitializeSemaphore(KSEMAPHORE *s, LONG count, LONG limit)
+{
+    s->Header.Type = SemaphoreObject;
+    s->Header.SignalState = count;
+    s->Limit = limit;
+    s->Header.WaitListHead.Flink = s->Header.WaitListHead.Blink = &s->Header.WaitListHead;
+}
+LONG NTAPI KeReleaseSemaphore(KSEMAPHORE *s, LONG boost, LONG adjust, uint8_t wait)
+{
+    LONG prev;
+    uint64_t f = irq_save();
+    (void)boost; (void)wait;
+    prev = s->Header.SignalState;
+    if (prev + adjust > s->Limit) { irq_restore(f); kpanic("KeReleaseSemaphore over limit"); }
+    s->Header.SignalState = prev + adjust;
+    irq_restore(f);
+    return prev;
+}
+LONG NTAPI KeReadStateSemaphore(KSEMAPHORE *s) { return s->Header.SignalState; }
+
+void NTAPI KeInitializeMutex(KMUTANT *m, uint32_t level)
+{
+    (void)level;
+    m->Header.Type = MutantObject;
+    m->Header.SignalState = 1;                    /* 1 = free */
+    m->OwnerThread = 0; m->Abandoned = 0;
+    m->Header.WaitListHead.Flink = m->Header.WaitListHead.Blink = &m->Header.WaitListHead;
+}
+LONG NTAPI KeReleaseMutex(KMUTANT *m, uint8_t wait)
+{
+    (void)wait;
+    m->Header.SignalState++;
+    if (m->Header.SignalState == 1) m->OwnerThread = 0;
+    return 0;
+}
+
+int64_t ntdrv_100ns_now(void);
+
+/* Poll-based wait: correct on the UP scheduler and only ever called at PASSIVE/APC. */
+static int32_t wait_one(DISPATCHER_HEADER *h, int64_t *deadline_tick, int alertable)
+{
+    (void)alertable;
+    if (g_irql >= DISPATCH_LEVEL) kpanic("KeWaitForSingleObject at IRQL %u", g_irql);
+    for (;;) {
+        uint64_t f = irq_save();
+        if (hdr_signaled(h)) { hdr_acquire(h); irq_restore(f); return STATUS_SUCCESS; }
+        irq_restore(f);
+        if (deadline_tick && *deadline_tick >= 0 && (int64_t)ticks_now() >= *deadline_tick)
+            return STATUS_TIMEOUT;
+        thread_sleep_ms(1);
+    }
+}
+
+static int64_t deadline_from(int64_t *timeout_100ns, int64_t *store)
+{
+    if (!timeout_100ns) { *store = -1; return -1; }             /* infinite */
+    if (*timeout_100ns == 0) { *store = 0; return 0; }
+    if (*timeout_100ns < 0) {                                    /* relative */
+        uint64_t ms = (uint64_t)(-*timeout_100ns) / 10000;
+        *store = (int64_t)ticks_now() + (int64_t)(ms ? ms : 1);
+    } else {
+        *store = (int64_t)ticks_now();                           /* absolute times unsupported: fire soon */
+    }
+    return *store;
+}
+
+int32_t NTAPI KeWaitForSingleObject(void *obj, uint32_t reason, uint8_t mode, uint8_t alertable, int64_t *timeout)
+{
+    DISPATCHER_HEADER *h = obj;
+    int64_t store;
+    (void)reason; (void)mode;
+    deadline_from(timeout, &store);
+    if (timeout && *timeout == 0) {                             /* zero timeout: poll once */
+        uint64_t f = irq_save();
+        if (hdr_signaled(h)) { hdr_acquire(h); irq_restore(f); return STATUS_SUCCESS; }
+        irq_restore(f);
+        return STATUS_TIMEOUT;
+    }
+    return wait_one(h, timeout ? &store : 0, alertable);
+}
+
+int32_t NTAPI KeWaitForMultipleObjects(uint32_t count, void **objs, uint32_t wait_type, uint32_t reason,
+                                       uint8_t mode, uint8_t alertable, int64_t *timeout, void *wait_blocks)
+{
+    int64_t store, *dl;
+    uint32_t i;
+    (void)reason; (void)mode; (void)alertable; (void)wait_blocks;
+    if (g_irql >= DISPATCH_LEVEL && !(timeout && *timeout == 0)) kpanic("KeWaitForMultipleObjects at IRQL %u", g_irql);
+    deadline_from(timeout, &store);
+    dl = timeout ? &store : 0;
+    for (;;) {
+        uint64_t f = irq_save();
+        if (wait_type == 1) {                                   /* WaitAny */
+            for (i = 0; i < count; ++i)
+                if (hdr_signaled((DISPATCHER_HEADER *)objs[i])) { hdr_acquire((DISPATCHER_HEADER *)objs[i]); irq_restore(f); return STATUS_WAIT_0 + i; }
+        } else {                                                /* WaitAll */
+            int all = 1;
+            for (i = 0; i < count; ++i) if (!hdr_signaled((DISPATCHER_HEADER *)objs[i])) { all = 0; break; }
+            if (all) { for (i = 0; i < count; ++i) hdr_acquire((DISPATCHER_HEADER *)objs[i]); irq_restore(f); return STATUS_SUCCESS; }
+        }
+        irq_restore(f);
+        if (dl && *dl >= 0 && (int64_t)ticks_now() >= *dl) return STATUS_TIMEOUT;
+        if (dl && *dl == 0) return STATUS_TIMEOUT;
+        thread_sleep_ms(1);
+    }
+}
+
+/* ---------------------------------------------------------------- timers */
+static KTIMER *timer_list[32];
+static unsigned timer_count;
+
+static void KeInitTimerCommon(KTIMER *t, int synch)
+{
+    memset(t, 0, sizeof *t);
+    t->Header.Type = synch ? TimerSynchronizationObject : TimerNotificationObject;
+    t->Header.SignalState = 0;
+    t->Header.WaitListHead.Flink = t->Header.WaitListHead.Blink = &t->Header.WaitListHead;
+}
+void NTAPI KeInitializeTimer(KTIMER *t) { KeInitTimerCommon(t, 0); }
+void NTAPI KeInitializeTimerEx(KTIMER *t, uint32_t type) { KeInitTimerCommon(t, type == 1); }
+
+static void timer_arm(KTIMER *t)
+{
+    unsigned i;
+    for (i = 0; i < timer_count; ++i) if (timer_list[i] == t) return;
+    if (timer_count < 32) timer_list[timer_count++] = t;
+}
+static uint8_t timer_set(KTIMER *t, int64_t due_100ns, LONG period_ms, KDPC *dpc)
+{
+    uint64_t f = irq_save();
+    uint8_t was = t->Header.SignalState != 0;
+    uint64_t rel_ms = due_100ns < 0 ? (uint64_t)(-due_100ns) / 10000 : 1;   /* relative only; absolute -> soon */
+    t->DueTime = ticks_now() + (rel_ms ? rel_ms : 1);
+    t->Period = (uint32_t)(period_ms > 0 ? period_ms : 0);
+    t->Dpc = dpc;
+    t->Header.SignalState = 0;
+    t->Header.Inserted = 1;
+    timer_arm(t);
+    irq_restore(f);
+    return was;
+}
+uint8_t NTAPI KeSetTimer(KTIMER *t, LARGE_INTEGER due, KDPC *dpc) { return timer_set(t, due.QuadPart, 0, dpc); }
+uint8_t NTAPI KeSetTimerEx(KTIMER *t, LARGE_INTEGER due, LONG period, KDPC *dpc) { return timer_set(t, due.QuadPart, period, dpc); }
+uint8_t NTAPI KeCancelTimer(KTIMER *t)
+{
+    uint64_t f = irq_save();
+    unsigned i;
+    uint8_t was = t->Header.Inserted;
+    t->Header.Inserted = 0;
+    for (i = 0; i < timer_count; ++i) if (timer_list[i] == t) { timer_list[i] = timer_list[--timer_count]; break; }
+    irq_restore(f);
+    return was;
+}
+uint8_t NTAPI KeReadStateTimer(KTIMER *t) { return t->Header.SignalState != 0; }
+
+static void timer_thread(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        uint64_t now, f;
+        unsigned i;
+        thread_sleep_ms(1);
+        now = ticks_now();
+        f = irq_save();
+        for (i = 0; i < timer_count; ++i) {
+            KTIMER *t = timer_list[i];
+            if (t->Header.Inserted && t->DueTime <= now) {
+                KDPC *dpc = t->Dpc;
+                t->Header.SignalState = 1;
+                if (t->Period) t->DueTime = now + t->Period;
+                else { t->Header.Inserted = 0; timer_list[i] = timer_list[--timer_count]; --i; }
+                if (dpc) { irq_restore(f); KeInsertQueueDpc(dpc, 0, 0); f = irq_save(); }
+            }
+        }
+        irq_restore(f);
+    }
+}
+
+/* ---------------------------------------------------------------- time / delay / stall */
+int64_t ntdrv_100ns_now(void)
+{
+    hcreg_t secs = 0;
+    shz_hcall(SHZ_HC_WALLTIME, 0, 0, &secs);
+    return (int64_t)(secs + 11644473600ull) * 10000000ll + (int64_t)((shz_time_ns() % 1000000000ull) / 100);
+}
+void NTAPI KeQuerySystemTime(LARGE_INTEGER *t) { t->QuadPart = ntdrv_100ns_now(); }
+void NTAPI KeQuerySystemTimePrecise(LARGE_INTEGER *t) { t->QuadPart = ntdrv_100ns_now(); }
+LARGE_INTEGER NTAPI KeQueryPerformanceCounter(LARGE_INTEGER *freq)
+{
+    LARGE_INTEGER v;
+    if (freq) freq->QuadPart = 1000000000ll;                    /* ns ticks */
+    v.QuadPart = (int64_t)shz_time_ns();
+    return v;
+}
+uint32_t NTAPI KeQueryTimeIncrement(void) { return TICK_US * 10; }          /* 100 ns units per tick */
+uint64_t NTAPI KeQueryInterruptTime(void) { return shz_time_ns() / 100; }
+
+int32_t NTAPI KeDelayExecutionThread(uint8_t mode, uint8_t alertable, int64_t *interval)
+{
+    (void)mode; (void)alertable;
+    if (g_irql >= DISPATCH_LEVEL) kpanic("KeDelayExecutionThread at IRQL %u", g_irql);
+    if (interval && *interval < 0) {
+        uint64_t ms = (uint64_t)(-*interval) / 10000;
+        thread_sleep_ms(ms ? ms : 1);
+    } else {
+        thread_yield();
+    }
+    return STATUS_SUCCESS;
+}
+void NTAPI KeStallExecutionProcessor(uint32_t us)
+{
+    uint64_t end = shz_time_ns() + (uint64_t)us * 1000ull;
+    while (shz_time_ns() < end) __asm__ volatile("pause");
+}
+
+/* ---------------------------------------------------------------- misc Ke */
+uint32_t NTAPI KeGetCurrentProcessorNumber(void) { return 0; }
+uint32_t NTAPI KeGetCurrentProcessorNumberEx(void *g) { (void)g; return 0; }
+uint32_t NTAPI KeQueryActiveProcessorCount(void *g) { (void)g; return 1; }
+uint32_t NTAPI KeQueryMaximumProcessorCount(void) { return 1; }
+void *NTAPI KeGetCurrentThread(void) { return thread_current(); }
+static void run_bugcheck_callbacks(void);
+void NTAPI KeBugCheckEx(uint32_t code, uint64_t p1, uint64_t p2, uint64_t p3, uint64_t p4)
+{
+    run_bugcheck_callbacks();
+    kpanic("KeBugCheckEx 0x%x (%llx %llx %llx %llx) from driver", code, p1, p2, p3, p4);
+}
+void NTAPI KeBugCheck(uint32_t code) { run_bugcheck_callbacks(); kpanic("KeBugCheck 0x%x from driver", code); }
+
+/* ---------------------------------------------------------------- interlocked */
+LONG NTAPI InterlockedIncrement(LONG *p) { return __atomic_add_fetch(p, 1, __ATOMIC_SEQ_CST); }
+LONG NTAPI InterlockedDecrement(LONG *p) { return __atomic_sub_fetch(p, 1, __ATOMIC_SEQ_CST); }
+LONG NTAPI InterlockedExchange(LONG *p, LONG v) { return __atomic_exchange_n(p, v, __ATOMIC_SEQ_CST); }
+LONG NTAPI InterlockedExchangeAdd(LONG *p, LONG v) { return __atomic_fetch_add(p, v, __ATOMIC_SEQ_CST); }
+LONG NTAPI InterlockedCompareExchange(LONG *p, LONG ex, LONG comp) { __atomic_compare_exchange_n(p, &comp, ex, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); return comp; }
+int64_t NTAPI InterlockedCompareExchange64(int64_t *p, int64_t ex, int64_t comp) { __atomic_compare_exchange_n(p, &comp, ex, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); return comp; }
+void *NTAPI InterlockedExchangePointer(void **p, void *v) { return __atomic_exchange_n(p, v, __ATOMIC_SEQ_CST); }
+void *NTAPI InterlockedCompareExchangePointer(void **p, void *ex, void *comp) { __atomic_compare_exchange_n(p, &comp, ex, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); return comp; }
+
+/* ---------------------------------------------------------------- Ex fast mutex / pools */
+struct FAST_MUTEX { LONG Count; void *Owner; uint32_t Contention; uint8_t _pad[4]; void *Event[3]; };
+void NTAPI ExInitializeFastMutex(struct FAST_MUTEX *m) { m->Count = 1; m->Owner = 0; m->Contention = 0; }
+void NTAPI ExAcquireFastMutex(struct FAST_MUTEX *m)
+{
+    if (g_irql > APC_LEVEL) kpanic("ExAcquireFastMutex at IRQL %u", g_irql);
+    while (__atomic_sub_fetch(&m->Count, 1, __ATOMIC_SEQ_CST) < 0) {
+        __atomic_add_fetch(&m->Count, 1, __ATOMIC_SEQ_CST);
+        m->Contention++;
+        thread_yield();
+    }
+    m->Owner = thread_current();
+}
+void NTAPI ExReleaseFastMutex(struct FAST_MUTEX *m) { m->Owner = 0; __atomic_add_fetch(&m->Count, 1, __ATOMIC_SEQ_CST); }
+uint8_t NTAPI ExTryToAcquireFastMutex(struct FAST_MUTEX *m)
+{
+    LONG one = 1;
+    if (__atomic_compare_exchange_n(&m->Count, &one, 0, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) { m->Owner = thread_current(); return 1; }
+    return 0;
+}
+
+#define POOL_TAGGED 0x40000000
+void *NTAPI ExAllocatePool(uint32_t type, uint64_t n) { (void)type; return kmalloc(n ? n : 1); }
+void *NTAPI ExAllocatePoolWithTag(uint32_t type, uint64_t n, uint32_t tag) { (void)type; (void)tag; return kmalloc(n ? n : 1); }
+void *NTAPI ExAllocatePoolWithTagPriority(uint32_t type, uint64_t n, uint32_t tag, int pri) { (void)type; (void)tag; (void)pri; return kmalloc(n ? n : 1); }
+void *NTAPI ExAllocatePoolUninitialized(uint32_t type, uint64_t n, uint32_t tag) { (void)type; (void)tag; return kmalloc(n ? n : 1); }
+void *NTAPI ExAllocatePool2(uint64_t flags, uint64_t n, uint32_t tag)
+{
+    void *p = kmalloc(n ? n : 1);
+    (void)tag;
+    if (p && !(flags & 0x100 /* POOL_FLAG_UNINITIALIZED */)) memset(p, 0, n);
+    return p;
+}
+void NTAPI ExFreePool(void *p) { kfree(p); }
+void NTAPI ExFreePoolWithTag(void *p, uint32_t tag) { (void)tag; kfree(p); }
+
+/* ExInterlocked list helpers used by many drivers (single-linked). */
+void NTAPI ExInitializeSListHead(void *h) { memset(h, 0, 16); }
+void NTAPI KeInitializeDeviceQueue(void *q) { memset(q, 0, 0x28); }
+
+void ntdrv_ke_init(void)                        /* idempotent: the first driver load (kernel or NtLoadDriver) starts it */
+{
+    thread_t *w, *tt;
+    if (ke_ready) return;
+    sem_init(&dpc_sem, 0);
+    write_irql(PASSIVE_LEVEL);
+    w = thread_create("ntdrv-dpc", dpc_worker, 0);
+    tt = thread_create("ntdrv-timer", timer_thread, 0);
+    KASSERT(w && tt);
+    ke_ready = 1;
+}
+
+/* ---------------------------------------------------------------- Ex interlocked lists and S-lists */
+LIST_ENTRY *NTAPI ExInterlockedInsertHeadList(LIST_ENTRY *head, LIST_ENTRY *e, KSPIN_LOCK *lock)
+{
+    uint8_t old = KfAcquireSpinLock(lock);
+    LIST_ENTRY *first = head->Flink;
+    e->Flink = first; e->Blink = head; first->Blink = e; head->Flink = e;
+    KfReleaseSpinLock(lock, old);
+    return first == head ? 0 : first;
+}
+LIST_ENTRY *NTAPI ExInterlockedInsertTailList(LIST_ENTRY *head, LIST_ENTRY *e, KSPIN_LOCK *lock)
+{
+    uint8_t old = KfAcquireSpinLock(lock);
+    LIST_ENTRY *last = head->Blink;
+    e->Flink = head; e->Blink = last; last->Flink = e; head->Blink = e;
+    KfReleaseSpinLock(lock, old);
+    return last == head ? 0 : last;
+}
+LIST_ENTRY *NTAPI ExInterlockedRemoveHeadList(LIST_ENTRY *head, KSPIN_LOCK *lock)
+{
+    uint8_t old = KfAcquireSpinLock(lock);
+    LIST_ENTRY *e = head->Flink;
+    if (e == head) e = 0;
+    else { head->Flink = e->Flink; e->Flink->Blink = head; }
+    KfReleaseSpinLock(lock, old);
+    return e;
+}
+uint32_t NTAPI ExInterlockedAddUlong(uint32_t *addend, uint32_t inc, KSPIN_LOCK *lock)
+{
+    uint8_t old = KfAcquireSpinLock(lock);
+    uint32_t prev = *addend;
+    *addend = prev + inc;
+    KfReleaseSpinLock(lock, old);
+    return prev;
+}
+LARGE_INTEGER NTAPI ExInterlockedAddLargeInteger(LARGE_INTEGER *addend, LARGE_INTEGER inc, KSPIN_LOCK *lock)
+{
+    uint8_t old = KfAcquireSpinLock(lock);
+    LARGE_INTEGER prev = *addend;
+    addend->QuadPart += inc.QuadPart;
+    KfReleaseSpinLock(lock, old);
+    return prev;
+}
+/* SLIST_HEADER, x64 layout: Alignment = Depth:16 | Sequence:48, Region = Reserved:4 | NextEntry:60 (address >> 4).
+ * Entries are 16-byte aligned, so the pointer is stored as it is. Drivers read Depth through the inline
+ * ExQueryDepthSList, hence the exact encoding. Push/pop run with interrupts off (uniprocessor). */
+typedef struct { uint64_t alignment, region; } slist_header_t;
+typedef struct single_entry { struct single_entry *Next; } single_entry_t;
+void *NTAPI ExpInterlockedPushEntrySList(slist_header_t *h, single_entry_t *e)
+{
+    uint64_t f = irq_save();
+    single_entry_t *first = (single_entry_t *)(h->region & ~0xfull);
+    e->Next = first;
+    h->region = (h->region & 0xfull) | ((uint64_t)e & ~0xfull);           /* the low nibble is HeaderType/Init, not the pointer */
+    h->alignment = ((h->alignment & ~0xffffull) + 0x10000) | (((h->alignment & 0xffff) + 1) & 0xffff);
+    irq_restore(f);
+    return first;
+}
+void *NTAPI ExpInterlockedPopEntrySList(slist_header_t *h)
+{
+    uint64_t f = irq_save();
+    single_entry_t *first = (single_entry_t *)(h->region & ~0xfull);
+    if (first) {
+        h->region = (h->region & 0xfull) | ((uint64_t)first->Next & ~0xfull);
+        h->alignment = ((h->alignment & ~0xffffull) + 0x10000) | (((h->alignment & 0xffff) - 1) & 0xffff);
+    }
+    irq_restore(f);
+    return first;
+}
+
+/* ---------------------------------------------------------------- processor information */
+int8_t ntdrv_KeNumberProcessors = 1;                    /* the CCHAR data export KeNumberProcessors */
+uint32_t NTAPI KeGetRecommendedSharedDataAlignment(void) { return 64; }     /* the cache line */
+/* Per-processor tick counts (idle, kernel+user) and the processor index. The kernel keeps no idle accounting, so idle
+ * is reported as 0 and the timer tick count as busy time: a cumulative count, monotonic, in ticks. */
+extern uint64_t arch_timer_irqs(void);                  /* arch.c */
+void NTAPI ExGetCurrentProcessorCounts(uint32_t *idle, uint32_t *kernel_user, uint32_t *index)
+{
+    if (idle) *idle = 0;
+    if (kernel_user) *kernel_user = (uint32_t)arch_timer_irqs();
+    if (index) *index = 0;
+}
+void NTAPI ExGetCurrentProcessorCpuUsage(uint32_t *usage) { if (usage) *usage = 100; }   /* no idle accounting: fully busy */
+
+/* ---------------------------------------------------------------- bug-check callbacks */
+/* KBUGCHECK_CALLBACK_RECORD (0x40): Entry(0x00) CallbackRoutine(0x10) Buffer(0x18) Length(0x20) Component(0x28)
+ * Checksum(0x30) State(0x38). Records are kept on a list; KeBugCheckEx runs them before halting. */
+typedef struct { LIST_ENTRY Entry; void *CallbackRoutine, *Buffer; uint32_t Length, _p; const char *Component;
+                 uint64_t Checksum; uint8_t State, _pad[7]; } kbugcheck_record_t;
+_Static_assert(sizeof(kbugcheck_record_t) == 0x40, "bugcheck record");
+static LIST_ENTRY bugcheck_list = { &bugcheck_list, &bugcheck_list };
+uint8_t NTAPI KeRegisterBugCheckCallback(kbugcheck_record_t *r, void *routine, void *buf, uint32_t len, const char *component)
+{
+    uint64_t f = irq_save();
+    if (r->State == 1) { irq_restore(f); return 0; }             /* BufferInserted already */
+    r->CallbackRoutine = routine; r->Buffer = buf; r->Length = len; r->Component = component; r->State = 1;
+    r->Entry.Flink = &bugcheck_list; r->Entry.Blink = bugcheck_list.Blink;
+    bugcheck_list.Blink->Flink = &r->Entry; bugcheck_list.Blink = &r->Entry;
+    irq_restore(f);
+    return 1;
+}
+uint8_t NTAPI KeDeregisterBugCheckCallback(kbugcheck_record_t *r)
+{
+    uint64_t f = irq_save();
+    if (r->State != 1) { irq_restore(f); return 0; }
+    r->Entry.Blink->Flink = r->Entry.Flink; r->Entry.Flink->Blink = r->Entry.Blink;
+    r->State = 0;
+    irq_restore(f);
+    return 1;
+}
+
+/* KBUGCHECK_CALLBACK_ROUTINE(Buffer, Length), ms_abi: each registered record is called once, before the halt, with the
+ * driver's buffer. A callback that faults or blocks cannot be helped here; the list is walked once (State cleared). */
+static void run_bugcheck_callbacks(void)
+{
+    LIST_ENTRY *e = bugcheck_list.Flink;
+    unsigned guard = 0;
+    while (e != &bugcheck_list && guard++ < 256) {
+        kbugcheck_record_t *r = (kbugcheck_record_t *)e;
+        e = e->Flink;
+        if (r->State == 1 && r->CallbackRoutine) {
+            r->State = 2;                                   /* BufferStarted */
+            ((void (NTAPI *)(void *, uint32_t))r->CallbackRoutine)(r->Buffer, r->Length);
+            r->State = 3;                                   /* BufferFinished */
+        }
+    }
+}

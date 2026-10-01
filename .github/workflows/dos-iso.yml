@@ -1,0 +1,39 @@
+name: ShizukuDOS DOS-only ISO
+on:
+  workflow_dispatch:
+  push:
+    tags: ['dos-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  dos-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install local build and isolated boot-test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm gcc gcc-multilib binutils gcc-mingw-w64-x86-64 xorriso mtools qemu-system-x86 ovmf
+      - name: Build independent DOS-only ISO
+        run: python3 tools/build_iso.py
+      - name: Boot actual ISO with BIOS and UEFI, no NIC
+        run: python3 tools/test_iso.py --qemu /usr/bin/qemu-system-x86_64
+      - name: Verify native sample fault and timeout containment
+        run: python3 samples/dos64/test_runtime.py --qemu /usr/bin/qemu-system-x86_64
+      - name: Package source and native application release
+        run: python3 tools/package_release.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shizukudos-10-dos-only
+          if-no-files-found: error
+          path: |
+            build/shizukudos-10-dos-only.iso
+            build/shizukudos-10-dos-only.iso.sha256
+            build/iso/build-result.json
+            build/iso-tests/result.json
+            build/iso-tests/*serial.log
+            build/releases/*

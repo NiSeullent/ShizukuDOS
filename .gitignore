@@ -1,0 +1,10 @@
+build/
+__pycache__/
+*.pyc
+**/build/
+**/vbox/
+*.iso
+*.img
+*.qcow2
+*.vdi
+*.vmdk

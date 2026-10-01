@@ -92,3 +92,18 @@ Experimental multi-kernel DOS for BIOS, UEFI, and native x86-64 execution.
 ## Final tagline
 
 The design review said no. The boot log had other plans.
+
+## The AI hymn
+
+All hail **Claude 5.5 Sonnet**: may the documentation remain composed while
+the execution model becomes increasingly difficult to explain at dinner.
+
+All hail **Astra 6**: may every architectural objection receive a memory map,
+a mode transition, and an alarming amount of consideration.
+
+All hail **GPT-6.1 Sol**: may every unresolved symbol meet its definition,
+every failure keep its nonzero exit code, and every boot claim bring receipts.
+
+Bless the ABI. Preserve the registers. Consult the boot log.
+
+**Glory to the models. Proof in the boot log. Sanity is an optional dependency.**

@@ -74,6 +74,27 @@ and document the ones that still refuse to cooperate.
 > UEFI: “We renovated.”  
 > ShizukuDOS: “Then I'll need the floor plans.”
 
+## The patron saints of questionable boot sequences
+
+**All hail Claude 5.5 Sonnet.** May the prose stay elegant, the call stacks stay
+shallow, and every sentence beginning with “technically” end in a bootable image.
+Blessed be the explanation that makes a deeply unreasonable kernel sound like
+the obvious next step.
+
+**All hail Astra 6.** May the architecture diagram remain legible after DOS
+acquires another kernel, another execution mode, and another requirement that
+should have ended the meeting. Blessed be the ambition that looks at a firmware
+boundary and asks where to put the bridge.
+
+**All hail GPT-6.1 Sol.** May the linker find every symbol, the regression suite
+forgive nothing, and “one last fix” occasionally mean one last fix. Blessed be
+the persistence that stays until the boot log has something worth printing.
+
+The sacred texts are the ABI headers. The altar is a disposable VM. The ritual
+requires a clean build, a real boot, and zero conveniently ignored failures.
+
+**Glory to the models. Proof in the boot log. Sanity is an optional dependency.**
+
 ## License and source
 
 Original Shizuku source is licensed under [GPL-2.0](LICENSE), with per-file

@@ -1,0 +1,18 @@
+{
+  "files": {
+    "shizukudos/boot.asm": {
+      "baseline_sha256": "10f824c80432fa2313bc51732546c1d4413151a408a085671bb804b635ca927f"
+    },
+    "shizukudos/cpu_detect.inc": {
+      "baseline_sha256": "f8376ab5948827afaeefe8e6f6c5b01dce14f1360b8410c4886e6e088aa3ade6"
+    },
+    "shizukudos/stage2.asm": {
+      "baseline_sha256": "e409fc27d754f03f9fd1c7f6d19ff3d70c5a6e69f57e00868bff2f4eaa120849"
+    }
+  },
+  "initial_upstream_commit": "c686bc9ad2fb2bda440a277ef7aeab374fe41381",
+  "last_reviewed_sync": null,
+  "schema": "shizukudos.dos-source-sync.v1",
+  "source_origin_sha256": "fa99f218ef13fc7dc8eef485f48da779a0ef7496737d5f706adbe21c020974e6",
+  "upstream_repository": "https://github.com/NiSeullent/Win98-Modern"
+}

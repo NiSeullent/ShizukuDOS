@@ -1,5 +1,14 @@
 # ShizukuDOS standalone development
 
+The user's 2026-10-03 hierarchy is authoritative: ShizukuCore is the common
+kernel, above ShizukuDOS (SZRm), Shizuku32 (SZPrtm), Shizuku64 (SZLm), and
+ShizukuOS (Windows98). ShizukuDOS is a subordinate DOS-compatible component,
+not the parent kernel or a DOS/FreeDOS ceiling on ShizukuCore development.
+The product combines Windows98 appearance/reused code with Shizuku Kernel,
+Shizuku Win32 and Shizuku Win32(x64), using gradual service/source migration.
+ReactOS and Wine are permitted implementation references. Existing source
+paths and offline defaults remain until their actual incremental conversion.
+
 This repository is an independent source copy, not a submodule of Win98-Modern.
 `SOURCE_ORIGIN.json` identifies the initial source and copied hashes. Preserve
 the original project and its separate Windows ISO release track.
@@ -22,8 +31,8 @@ isolated guests without a NIC; preserve other sessions' guests and source edits.
 
 ## Scope and ongoing DOS updates
 
-Treat this repository as the independent DOS shell and ShizukuOS Core source
-track. Keep Windows 98 installation, VMM/NT integration, application ports and
+Treat this repository as the independent ShizukuDOS subsystem/Core development
+source track under that hierarchy. Keep Windows 98 installation, VMM/NT integration, application ports and
 the Windows product ISO in Win98-Modern. Its official distribution site remains
 https://m98.nyase.kr. Preserve existing research history without promoting it
 into the standalone default release.

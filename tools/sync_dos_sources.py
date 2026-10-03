@@ -24,10 +24,11 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 def git(repo, *args):
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_OPTIONAL_LOCKS="0")
-    for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
-        env.pop(key, None)
-    result = subprocess.run(["git", "-C", str(repo), *args], stdout=subprocess.PIPE,
+    # Ignore inherited Git configuration, object-location and trace overrides.
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env.update(GIT_TERMINAL_PROMPT="0", GIT_OPTIONAL_LOCKS="0", GIT_NO_REPLACE_OBJECTS="1",
+               GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+    result = subprocess.run(["git", "--no-replace-objects", "-c", "core.fsmonitor=false", "-C", str(repo), *args], stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, timeout=15, env=env)
     if result.returncode:
         raise SyncRefused("local Git read failed: " + args[0])
@@ -97,7 +98,7 @@ def plan_sync(target, source, commit, paths=None, handoff=None):
         raise SyncRefused("a complete immutable source commit is required")
     if git(source, "cat-file", "-t", commit).strip() != b"commit":
         raise SyncRefused("source revision is not a commit")
-    upstream = git(source, "config", "--get", "remote.origin.url").decode().strip().removesuffix(".git").rstrip("/")
+    upstream = git(source, "config", "--local", "--no-includes", "--get", "remote.origin.url").decode().strip().removesuffix(".git").rstrip("/")
     if upstream != UPSTREAM:
         raise SyncRefused("source checkout origin does not match the reviewed upstream")
     policy, raw, origin = load_policy(target)

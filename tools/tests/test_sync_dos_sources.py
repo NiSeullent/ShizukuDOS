@@ -3,6 +3,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -159,6 +160,58 @@ class SyncTests(unittest.TestCase):
         with patch.object(sync,'_replace',failing),self.assertRaisesRegex(OSError,'write failure'):
             sync.apply_sync(report,state)
         self.assertEqual(before,self.before())
+    def assert_unreplaced_plan(self, commit):
+        report,state=sync.plan_sync(self.target,self.source,commit,paths=[PATH],handoff=self.handoff(source_commit=commit))
+        self.assertEqual(report['source_commit'],commit)
+        self.assertEqual(report['entries'][0]['source_sha256'],sync.sha(b"; shared original\n"))
+        self.assertEqual(state[4][PATH],b"; shared original\n")
+        sync.apply_sync(report,state)
+        self.assertEqual((self.target/PATH).read_bytes(),b"; shared original\n")
+    def test_commit_replace_cannot_change_approved_commit_contents(self):
+        approved=self.head()
+        self.change(self.source,PATH,b"; unapproved replacement commit\n")
+        replacement=self.head();self.git(self.source,'replace',approved,replacement)
+        self.assert_unreplaced_plan(approved)
+    def test_blob_replace_cannot_change_recorded_blob_contents(self):
+        approved=self.head()
+        original=self.git(self.source,'rev-parse',approved+':'+PATH).decode().strip()
+        self.change(self.source,PATH,b"; unapproved replacement blob\n")
+        replacement=self.git(self.source,'rev-parse',self.head()+':'+PATH).decode().strip()
+        self.git(self.source,'replace',original,replacement)
+        self.assert_unreplaced_plan(approved)
+    def test_alternate_replace_ref_base_is_ignored(self):
+        approved=self.head()
+        self.change(self.source,PATH,b"; alternate replacement commit\n")
+        self.git(self.source,'update-ref','refs/sync-custom-replacements/'+approved,self.head())
+        with patch.dict(os.environ,{'GIT_REPLACE_REF_BASE':'refs/sync-custom-replacements/','GIT_NO_REPLACE_OBJECTS':'0'}):
+            self.assert_unreplaced_plan(approved)
+    def test_environment_config_cannot_spoof_source_origin(self):
+        self.git(self.source,'remote','set-url','origin','https://example.invalid/unreviewed.git')
+        influences=(
+            {'GIT_CONFIG_COUNT':'1','GIT_CONFIG_KEY_0':'remote.origin.url','GIT_CONFIG_VALUE_0':sync.UPSTREAM},
+            {'GIT_CONFIG_PARAMETERS':"'remote.origin.url'='"+sync.UPSTREAM+"'"})
+        for values in influences:
+            with self.subTest(values=values),patch.dict(os.environ,values),self.assertRaisesRegex(sync.SyncRefused,'checkout origin'):
+                self.plan()
+    def test_included_or_global_config_cannot_spoof_source_origin(self):
+        self.git(self.source,'config','--unset','remote.origin.url')
+        config=Path(self.temp.name)/'injected-config'
+        config.write_text(chr(10).join(('[remote "origin"]', "url = "+sync.UPSTREAM, "")))
+        self.git(self.source,'config','include.path',str(config))
+        self.assertEqual(self.git(self.source,'config','--get','remote.origin.url').decode().strip(),sync.UPSTREAM)
+        with patch.dict(os.environ,{'GIT_CONFIG_GLOBAL':str(config)}),self.assertRaises(sync.SyncRefused):self.plan()
+    def test_status_never_executes_configured_fsmonitor_hook(self):
+        marker=Path(self.temp.name)/'fsmonitor-executed'
+        hook=Path(self.temp.name)/'fsmonitor-hook'
+        hook.write_text(chr(10).join(("#!/bin/sh", 'printf executed > "'+str(marker)+'"', "")))
+        hook.chmod(0o700)
+        self.git(self.target,'config','core.fsmonitor',str(hook))
+        self.git(self.target,'status','--porcelain=v1')
+        self.assertTrue(marker.exists())
+        marker.unlink()
+        report,state=self.plan(handoff=self.handoff())
+        sync.apply_sync(report,state)
+        self.assertFalse(marker.exists())
     def test_shared_source_baseline_advances_for_next_update(self):
         self.change(self.source,PATH,b'; first reviewed\n')
         report,state=self.plan(handoff=self.handoff());sync.apply_sync(report,state);self.commit(self.target)

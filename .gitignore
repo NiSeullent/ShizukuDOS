@@ -1,5 +1,4 @@
 build/
-.codex/
 __pycache__/
 *.pyc
 **/build/
@@ -9,3 +8,6 @@ __pycache__/
 *.qcow2
 *.vdi
 *.vmdk
+
+# Local agent task notes are not public source.
+.codex/

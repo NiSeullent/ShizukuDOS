@@ -102,6 +102,61 @@
         "80748b6cf15f2720983b02097bda1568724e06f7",
         "823594d0bdb7ce0afc8050e87210b48bd3f41f32"
       ]
+    },
+    {
+      "source_repository": "https://github.com/NiSeullent/ShizukuDOS",
+      "source_commit": "d9a53ddb993e2935abc3831740743ebd9e9b3901",
+      "standalone_preimage_commit": "7f77fc836c79596e596475275f99265f3d6e0739",
+      "behavior": "Optional reviewed DOS source synchronization workflow; no runtime source import",
+      "adaptation": "Preserve standalone DOS shell history and require local-only Git reads, including missing objects in promisor checkouts. No timer, service, guest, build, fetch or default-runtime change.",
+      "files": {
+        ".gitignore": {
+          "source_sha256": "7d6bb9c9f9ebcc91580df97f15875327a00b1c10ee6a251ff8298b6781e99de4",
+          "target_sha256": "7d6bb9c9f9ebcc91580df97f15875327a00b1c10ee6a251ff8298b6781e99de4",
+          "target_bytes": 135,
+          "adapted": false
+        },
+        "docs/DOS_SOURCE_SYNC.json": {
+          "source_sha256": "e749f46ed69671e7dedcdde038d12758483faf441d5b0b7aab52dd4d8faccf2d",
+          "target_sha256": "e749f46ed69671e7dedcdde038d12758483faf441d5b0b7aab52dd4d8faccf2d",
+          "target_bytes": 725,
+          "adapted": false
+        },
+        "docs/DOS_SOURCE_SYNC.md": {
+          "source_sha256": "861d6d004fba6bf933c7f6953649cd3cd5733b7a73d4b207977c9b89fe559e31",
+          "target_sha256": "84e0ba52ac1d759625ca12a914bbbffa3bce7217ace1c94346e5228303d06b58",
+          "target_bytes": 5812,
+          "adapted": true
+        },
+        "tools/sync_dos_sources.py": {
+          "source_sha256": "32e5ccc3cefd631fdb1c65435cc9bfb6f1c30bf7b6f9ac8396c0a5613a7a0bd9",
+          "target_sha256": "a08f1d4c1e47a37c087ad551d745e9366c18c7bda82feb19cd313bbdb71f36db",
+          "target_bytes": 10587,
+          "adapted": true
+        },
+        "tools/tests/test_sync_dos_sources.py": {
+          "source_sha256": "3f1b483781da4edf7b081803028e8b4b5e5b5dbd7dc6e560ddba3302c1cd357b",
+          "target_sha256": "1bd8405f163b203ec1ae6e6729cdf25c2e87033a7cc2ee638b479819f4b40028",
+          "target_bytes": 15944,
+          "adapted": true
+        }
+      },
+      "validation": {
+        "status": "ACTUAL_HOST_CHECKS_PASS",
+        "host_tests": 28,
+        "exit_code": 0,
+        "reported_seconds": 7.986,
+        "receipt_sha256": "831ae52bb7075cfe7c2716ff925938ba5519b18e7b82c7e1fc00bc80232866e4",
+        "original_promisor_transport_refusal_control": {
+          "before_fix": "1 actual test failed; local transport marker created",
+          "after_fix": "included in 28 PASS tests; missing blob refused without transport"
+        },
+        "scope": "Actual local Git fixture tests only; tool output transcript copied to file, not separate process-stream custody",
+        "source_before_after_freeze_claimed": false,
+        "VM_executed": false,
+        "default_ISO_rebuilt": false,
+        "DOS_compatibility_complete": false
+      }
     }
   ]
 }

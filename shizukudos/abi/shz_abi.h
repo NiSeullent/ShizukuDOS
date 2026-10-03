@@ -53,8 +53,11 @@ enum shz_hcall {
     SHZ_HC_DOMAIN_STATE = 10,   /* rbx = domain id; rbx <- state, rcx <- generation */
     SHZ_HC_ABI_VERSION = 11,    /* rbx <- (major << 16) | minor */
     SHZ_HC_WALLTIME = 12,       /* rbx <- seconds since 1970-01-01 UTC from the platform RTC */
-    SHZ_HC_CHANNEL_INFO = 13    /* ABI 1.1: rbx = channel index; rbx <- guest-physical base, rcx <- peer domain, or E_NOENT.
+    SHZ_HC_CHANNEL_INFO = 13,   /* ABI 1.1: rbx = channel index; rbx <- guest-physical base, rcx <- peer domain, or E_NOENT.
                                  * For domains that receive no bootinfo (the Win98 domain's VxD). */
+    SHZ_HC_CLOCK_SPLIT = 15    /* readonly, independently versioned shz_clock.h:
+                                 rbx=version, rcx=0; EBX<-low32, ECX<-high32 of
+                                 one elapsed-nanosecond sample. Old HC_TIME is unchanged. */
 };
 
 enum shz_status {

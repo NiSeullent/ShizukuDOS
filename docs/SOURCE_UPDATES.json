@@ -157,6 +157,98 @@
         "default_ISO_rebuilt": false,
         "DOS_compatibility_complete": false
       }
+    },
+    {
+      "source_repository": "https://github.com/NiSeullent/Win98-Modern",
+      "source_commit": "c3ac4df3997da049f09a80656e2ab4600ccf4cc8",
+      "public_intake_commit": "7a41832d3ce7316d3076dd70b050e99c2bc11e26",
+      "standalone_preimage_commit": "68d4e4ac80852db300f30952557d9bf9640b436f",
+      "initial_origin_record": "SOURCE_ORIGIN.json",
+      "initial_origin_sha256": "fa99f218ef13fc7dc8eef485f48da779a0ef7496737d5f706adbe21c020974e6",
+      "behavior": "Portable ShizukuCore elapsed clock math and independently versioned read-only HC15; ShizukuDOS remains a subordinate DOS-compatible component.",
+      "adaptation": "Copy the original common clock contract; port only the HC15 declaration, actual Supervisor sample/case and build source pin. Keep opcode14 vacant here, HC_TIME and ABI 1.1 unchanged. No Windows frontends, native media, PMA/account/Core replacement, default profile or source-sync allowlist change. New host controls compile actual production functions.",
+      "files": {
+        "shizukudos/abi/shz_clock.h": {
+          "source_sha256": "980d91ec73ab8e665b40fec5dbbb93cbda7af5189d16ff43f5511c87ad5a346a",
+          "target_sha256": "980d91ec73ab8e665b40fec5dbbb93cbda7af5189d16ff43f5511c87ad5a346a",
+          "target_bytes": 2176,
+          "adapted": false
+        },
+        "shizukudos/abi/shz_abi.h": {
+          "source_sha256": "3672de7b872eb65cf6bd5bbe60e62024217f2b4cbe03320b2d39e8f97090fa75",
+          "target_sha256": "d4213ee308d52ad1c392f7932baa92713aedc48c8fe15b70e21e77dbc8f1fde5",
+          "target_bytes": 10698,
+          "adapted": true
+        },
+        "shizukudos/supervisor/src/domain.c": {
+          "source_sha256": "278ea3343ff2e0327a10dcbe69c8891089428d6a2c14e7c8a45ea807a6373043",
+          "target_sha256": "0c3efa25960a883cc26099d3397080faa9ed1743c62af192e6de8f183c002a42",
+          "target_bytes": 22537,
+          "adapted": true
+        },
+        "shizukudos/supervisor/build.py": {
+          "source_sha256": "d82ce0de77fde65961fd82796a3b49677923b52d585429812a6ed8378e55aeb5",
+          "target_sha256": "9e49f6ffc912e0e120635d7e0c1a1d8d9ab5b3f65a800394d1a3b695948a099f",
+          "target_bytes": 8819,
+          "adapted": true
+        },
+        "shizukudos/abi/test_clock.c": {
+          "source_sha256": null,
+          "target_sha256": "6ca9bfbc71215092eb8b66e9de80f79824def2fe7797e05c9ccd2cab5c7df1b5",
+          "target_bytes": 6797,
+          "adapted": false,
+          "authored_for_standalone": true
+        },
+        "shizukudos/abi/test_clock.py": {
+          "source_sha256": null,
+          "target_sha256": "a6a32039d5788ef2ef3480204b555c353105f7642e529f8cdfebd68cea8fc44e",
+          "target_bytes": 7514,
+          "adapted": false,
+          "authored_for_standalone": true
+        }
+      },
+      "validation": {
+        "status": "ACTUAL_CORE_COMPONENT_CHECKS_PASS",
+        "clock_checks_per_compiler": 24235,
+        "compilers": [
+          "gcc",
+          "clang"
+        ],
+        "sanitizers": [
+          "address",
+          "undefined"
+        ],
+        "actual_supervisor_translation_unit_compiled": [
+          "gcc",
+          "clang"
+        ],
+        "clock_component_receipt_sha256": "166af85a749f49bb54140db944a4d2f47670ec7a01e0e1bd8c5b1506e2beccde",
+        "component_sources_before_after_match": true,
+        "isolated_gcc_runtime_inputs": {
+          "build/core-clock-sync-check1/gcc-sanitizers/libasan.so.8.0.0": "108b629dfa9208d259e6f86a6e1ea4ee3a785e52223a25fa9b23d040bff272bd",
+          "build/core-clock-sync-check1/gcc-sanitizers/libubsan.so.1.0.0": "3be0b69b872f6f80787ad9465c45acc3473aade4cc7ac303ced9363d01d571aa"
+        },
+        "gcc_runtime_input_receipt_sha256": "0a71deff185c91a6c54de77f22ae428d26900584346ac95bec1ff52afd4ee2d0",
+        "existing_abi_selected_receipt_sha256": "44c8cdb460b20638d8654d836a15727c425bea417eabb70aaf1b6a9fa09f2e87",
+        "existing_abi_selected_scope": "Clang ASan/UBSan, actual eight unchanged C test methods split into 60-second batches with full original iterations; independent Python wire decoding and 6000 C/Python frame verdicts.",
+        "existing_abi_full_runner": {
+          "exit_code": 124,
+          "timeout_seconds": 120,
+          "elapsed_seconds": 120.048,
+          "receipt_sha256": "f403acd9daa20a81a818f5ba31f1bb3d779f0ca4de35a06768e522d1da4125f9",
+          "passed": false
+        },
+        "first_component_attempt": "GCC dynamic sanitizer runtime absent; link failed before tests. Retained failure receipt; matching official compiler runtime libraries were extracted only under ignored build/, without a system install.",
+        "first_component_failure_receipt_sha256": "83b84d4164dfd60e5d71668883859f07dba7f6174c10f22714143161b4995492",
+        "whole_hypercall_TSC_read_count_verified": false,
+        "default_ISO_rebuilt": false,
+        "VM_executed": false,
+        "Windows98_boot_verified": false,
+        "native_apps_verified": false,
+        "clock_hardware_resolution_verified": false,
+        "DOS_compatibility_complete": false
+      },
+      "initial_origin_commit": "c686bc9ad2fb2bda440a277ef7aeab374fe41381"
     }
   ]
 }

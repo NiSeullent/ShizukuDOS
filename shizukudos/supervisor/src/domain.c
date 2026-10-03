@@ -9,6 +9,7 @@
 #include "devices.h"
 #include "pool.h"
 #include "video.h"
+#include "../../abi/shz_clock.h"
 
 domain_t g_dom[SHZ_MAX_DOMAINS];
 shz_info_t *g_info;
@@ -94,6 +95,15 @@ static uint64_t elapsed_ns(void)
 {
     const uint64_t t = rdtsc() - g_start_tsc, sec = t / g_tsc_hz, rem = t % g_tsc_hz;
     return sec * 1000000000ull + rem * 1000000000ull / g_tsc_hz;
+}
+
+static int32_t clock_sample(void *opaque, uint64_t *value)
+{
+    (void)opaque;
+    /* One read of the existing Core authority, using its boot origin/frequency.
+     * The independently versioned call checks arithmetic; HC_TIME stays intact. */
+    if (!g_tsc_hz) return SHZ_E_INVALID;
+    return shz_clock_ticks_ns(rdtsc() - g_start_tsc, g_tsc_hz, value);
 }
 
 /* ------------------------------------------------------------------ CPUID */
@@ -298,6 +308,10 @@ int hcall_vmcall(domain_t *d)
         break;
     case SHZ_HC_TIME:
         r[GPR_RBX] = elapsed_ns();
+        break;
+    case SHZ_HC_CLOCK_SPLIT:
+        status = shz_clock_split(r[GPR_RBX], r[GPR_RCX], clock_sample, 0,
+                                 &r[GPR_RBX], &r[GPR_RCX]);
         break;
     case SHZ_HC_SET_DOORBELL_VECTOR:
         if (r[GPR_RBX] < 32 || r[GPR_RBX] > 255) status = SHZ_E_INVALID;

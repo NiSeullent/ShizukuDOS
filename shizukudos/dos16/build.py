@@ -15,6 +15,12 @@ interrupt coverage) added to AUTOEXEC.BAT and \EFI\BOOT\BOOTX64.EFI = CSMWrap
 (external, LGPL-2.1; wraps SeaBIOS CSM16, LGPL-3.0; built by shizukudos/csm/build.py).
 One image boots two ways: legacy BIOS -> MBR -> FreeDOS, and UEFI -> CSMWrap ->
 SeaBIOS CSM16 -> the same MBR -> FreeDOS. hd32.img is left exactly as before.
+
+Explicit --user-shell builds a separate BIOS-only compatibility-shell image.
+It calls SHZSTART.BAT, keeps a permanent COMMAND.COM prompt and selects recovery
+after missing/failed startup or SHZSAFE.TAG. It does not build the conformance
+programs or CSMWrap. This optional external-source profile is separate from the
+offline native dos-only ISO.
 """
 import argparse
 import json
@@ -33,6 +39,8 @@ TESTS = SHZ / "dos16" / "tests"
 CSM = BUILD / "csm"
 PATCHES = sorted((SHZ / "dos16" / "patches").glob("0*.patch"))
 FREECOM_PATCHES = sorted((SHZ / "dos16" / "patches").glob("freecom-*.patch"))
+USER = Path(__file__).resolve().parent / "user"
+USER_FILES = ("CONFIG.SYS", "AUTOEXEC.BAT", "SHZSTART.BAT", "RECOVER.BAT", "README.TXT")
 
 CONFIG_SYS = (
     "DOS=LOW\r\nFILES=30\r\nBUFFERS=20\r\nLASTDRIVE=Z\r\n"
@@ -184,13 +192,95 @@ def assemble_dual(kernel, freecom, tests, csm_efi):
     return image
 
 
+def user_text(path):
+    """Encode one CRLF per ASCII DOS text line without editing the source."""
+    return Path(path).read_text(encoding="ascii").replace("\r\n", "\n").replace("\n", "\r\n").encode("ascii")
+
+
+def assemble_user(kernel, freecom):
+    """Prepare the optional permanent/recovery shell on an MBR/FAT16 image."""
+    work = OUT / "user-boot"
+    work.mkdir(parents=True, exist_ok=True)
+    mbr, ready = work / "mbr.bin", work / "SHZREADY.COM"
+    commands = [
+        ["nasm", "-f", "bin", "-w+all", "-o", mbr, SHZ / "dos16" / "mbr.asm"],
+        ["nasm", "-f", "bin", "-w+all", "-o", ready, USER / "ready.asm"],
+    ]
+    for command in commands:
+        run(command)
+    members = {"SHZREADY.COM": ready}
+    for name, source in (("KERNEL.SYS", kernel["kernel"]), ("COMMAND.COM", freecom["command"])):
+        target = work / name
+        shutil.copyfile(source, target)
+        members[name] = target
+    for name in USER_FILES:
+        target = work / name
+        target.write_bytes(user_text(USER / name))
+        members[name] = target
+    config = members["CONFIG.SYS"].read_bytes()
+    if b" /P\r\n" not in config or not members["AUTOEXEC.BAT"].stat().st_size:
+        raise RuntimeError("The user-shell profile requires a permanent shell and AUTOEXEC.BAT")
+    image = OUT / "shizukudos-dos10.img"
+    spec = fatimg.make_hdd(image, mbr)
+    fatimg.install_freedos_boot(spec, kernel["boot_fat16"])
+    # The FreeDOS boot sector requires KERNEL.SYS to be the first copied file.
+    ordered = ["KERNEL.SYS", "COMMAND.COM", *[name for name in members if name not in ("KERNEL.SYS", "COMMAND.COM")]]
+    fatimg.copy_in(spec, [(members[name], name) for name in ordered])
+    for name, source in members.items():
+        if fatimg.read_bytes(spec, name) != source.read_bytes():
+            raise RuntimeError(f"User-shell image readback differs: {name}")
+    inputs = [Path(__file__).resolve(), USER / "ready.asm", *(USER / name for name in USER_FILES)]
+    return image, {
+        "profile": "dos16-user-shell-bios", "product": "ShizukuOS Core",
+        "kernel_origin": "pinned FreeDOS ke2046 + recorded local patches",
+        "shell_origin": "pinned FreeCOM 04fc21a", "auto_start": "C:\\SHZSTART.BAT",
+        "recovery": "startup absent/nonzero, SHZSAFE.TAG, RECOVER.BAT, retained F5/F8",
+        "permanent_shell": True, "conformance_auto_run": False,
+        "firmware": "BIOS", "native_default_ISO_built": False,
+        "guest_executed": False, "complete_MS_DOS_compatibility": False,
+        "sources_sha256": {str(path.relative_to(REPO)): sha256_file(path) for path in inputs},
+        "members": {name: {"bytes": path.stat().st_size, "sha256": sha256_file(path)} for name, path in members.items()},
+        "commands": [" ".join(str(value) for value in command) for command in commands],
+    }
+
+
+def build_user_shell(kernel, freecom):
+    """Record a source-built BIOS research image independently of other profiles."""
+    image, user_receipt = assemble_user(kernel, freecom)
+    manifest = shzlib.load_manifest()
+    receipt = {
+        "profile": "dos16-user-shell-bios", "built_utc": shzlib.utc_now(),
+        "git": shzlib.git_state(), "user_boot": user_receipt,
+        "upstream": {name: {key: manifest["upstreams"][name][key] for key in ("commit", "ref", "license")}
+                     for name in ("freedos-kernel", "freedos-freecom")},
+        "patches": kernel["patches"] + freecom["patches"],
+        "toolchain": {
+            "open-watcom": {"manifest_snapshot_sha256": manifest["tools"]["open-watcom-v2"]["sha256"]},
+            "nasm": shzlib.tool_version("nasm", ("-v",)),
+            "mtools": shzlib.tool_version("mformat", ("--version",)),
+        },
+        "commands": kernel["commands"] + freecom["commands"] + user_receipt["commands"],
+        "artifacts": {"dos10.img": {"sha256": sha256_file(image), "bytes": image.stat().st_size,
+                                   "origin": "source-built FreeDOS/FreeCOM + independent startup/recovery scripts"}},
+        "image_listing": fatimg.listing(fatimg.partition_spec(image)),
+        "guest_executed": False, "native_default_ISO_built": False,
+    }
+    shzlib.write_json(OUT / "user-shell-build-result.json", receipt)
+    print(json.dumps(receipt["artifacts"], indent=2))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
+    parser.add_argument("--user-shell", action="store_true",
+                        help="build only the optional BIOS FreeDOS/FreeCOM permanent/recovery shell")
+    args = parser.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     env = shzlib.ow_env()
     kernel = build_kernel(env)
     freecom = build_freecom(env)
+    if args.user_shell:
+        build_user_shell(kernel, freecom)
+        return
     tests, test_commands = build_tests(env)
     image = assemble_image(kernel, freecom, tests)
     csm_efi, csm_receipt = ensure_csmwrap()

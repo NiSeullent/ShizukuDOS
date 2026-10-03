@@ -22,6 +22,12 @@ or Windows installation media. The original Windows project keeps its own
 source and ISO track. [SOURCE_ORIGIN.json](SOURCE_ORIGIN.json) records the exact
 upstream commit and copied file hashes.
 
+This repository is maintained as the independent DOS shell and **ShizukuOS
+Core** track. Reviewed DOS changes from Win98-Modern are ported here in regular
+commit batches, preserving this project's own build and source history.
+Windows 98 installation and VMM/NT integration continue in Win98-Modern.
+[Source update records](docs/SOURCE_UPDATES.json) identify each later port.
+
 ## Build the DOS-only track
 
 ```sh
@@ -36,6 +42,19 @@ The default build uses installed NASM, GCC/binutils, x64/i686 MinGW, mtools, and
 xorriso. It writes generated artifacts under `build/`, fetches no upstream
 source, and changes no host boot or client configuration. QEMU and OVMF are
 needed for the boot checks. See [ISO instructions](docs/ISO.md).
+
+The optional pinned FreeDOS/FreeCOM research profile also has a persistent
+DOS16 user shell:
+
+```sh
+python3 -B shizukudos/dos16/build.py --user-shell
+```
+
+It produces `build/shizukudos/dos16/shizukudos-dos10.img` for BIOS boot, with
+automatic `SHZSTART.BAT`, a permanent prompt and recovery through
+`SHZSAFE.TAG` or `RECOVER`. It uses the existing external source/Open Watcom
+profile and its recorded licenses; the default native `dos-only` build remains
+offline. This optional profile is separate from the native default ISO.
 
 The ISO boots the original 16-bit FAT12 shell on BIOS. IA32 and x64 UEFI
 entry points start the same native x86-64 Kernel64 and open **ShizukuGUI**.

@@ -1,4 +1,5 @@
 build/
+.codex/
 __pycache__/
 *.pyc
 **/build/

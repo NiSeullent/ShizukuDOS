@@ -1,0 +1,107 @@
+{
+  "schema": 1,
+  "repository_scope": "Independent DOS shell / ShizukuOS Core",
+  "update_policy": "Port reviewed DOS changes in regular commit batches, preserving standalone APIs/defaults; commit and push after relevant validation. No full-tree mirroring or private inputs.",
+  "initial_origin_record": "SOURCE_ORIGIN.json",
+  "updates": [
+    {
+      "source_repository": "https://github.com/NiSeullent/Win98-Modern",
+      "source_commit": "56d335c16c0361f5c12d0a0309d85a59a9c79159",
+      "standalone_preimage_commit": "821aaad00f61408f11ae93d4722724a3255b235a",
+      "behavior": "Optional BIOS FreeDOS/FreeCOM permanent user shell, automatic startup, recovery and preserved failure diagnostics",
+      "adaptation": "BIOS-only optional --user-shell returns before conformance/CSMWrap. Native offline dos-only default and existing standalone source remain. Startup text identifies ShizukuOS Core; Windows-specific patches and integration claims excluded.",
+      "files": {
+        "shizukudos/dos16/build.py": {
+          "source_sha256": "a44090626eec59e6a6c7ccecbf54a8251929d784d96024ad77f1aa3a2d6f13e8",
+          "target_sha256": "269ebd905791bc1af9b624fc408bc22f5ca19c23bc700c84e759e2ec0bf0c9e5",
+          "target_bytes": 15709,
+          "adapted": true
+        },
+        "shizukudos/dos16/test_user_boot.py": {
+          "source_sha256": "efca770465d8ebe8dcf1aa7a155d832aa324b9bed0cfb8818a643288348f4411",
+          "target_sha256": "5d2c435fd750e5eb9c667e860cd78c41ef1c15952f19decc8b3d5c6767864d0a",
+          "target_bytes": 16608,
+          "adapted": true
+        },
+        "shizukudos/dos16/test_user_boot_failure.py": {
+          "source_sha256": "b5a3e0d85c79a49919d79573db9621c9ff2be2bd873c9d36a9e7c4b934d28c6d",
+          "target_sha256": "b5a3e0d85c79a49919d79573db9621c9ff2be2bd873c9d36a9e7c4b934d28c6d",
+          "target_bytes": 8344,
+          "adapted": false
+        },
+        "shizukudos/dos16/user/CONFIG.SYS": {
+          "source_sha256": "51b16874bb9473fe36734dc86c519102b031e12057e2647e98c767425d6bf5c6",
+          "target_sha256": "51b16874bb9473fe36734dc86c519102b031e12057e2647e98c767425d6bf5c6",
+          "target_bytes": 76,
+          "adapted": false
+        },
+        "shizukudos/dos16/user/AUTOEXEC.BAT": {
+          "source_sha256": "f0253a10ab9e2900908a89823970620c9535dc392b84f38c9d0a639ffc2aa960",
+          "target_sha256": "f0253a10ab9e2900908a89823970620c9535dc392b84f38c9d0a639ffc2aa960",
+          "target_bytes": 426,
+          "adapted": false
+        },
+        "shizukudos/dos16/user/SHZSTART.BAT": {
+          "source_sha256": "758de84da76fc0394c2ced2bd40544c319c24c69d19cb0ab6418e03d7f8cee3d",
+          "target_sha256": "136041558fa9ec5506105a6d144c685e8c0e1e949471a86b5dc25b04b15c8a53",
+          "target_bytes": 231,
+          "adapted": true
+        },
+        "shizukudos/dos16/user/RECOVER.BAT": {
+          "source_sha256": "73a0beb821016c76e4f5e884bc1739727a3f83e2c043448744b1e01271cac05f",
+          "target_sha256": "73a0beb821016c76e4f5e884bc1739727a3f83e2c043448744b1e01271cac05f",
+          "target_bytes": 405,
+          "adapted": false
+        },
+        "shizukudos/dos16/user/README.TXT": {
+          "source_sha256": "c6f6906fcefe0bbe7561bcc2cf45d0ec5b32aa337d80a3d459d95c220d266bec",
+          "target_sha256": "cddec684c7b372168bcbfe9e58835ea92a6d351394028f32fc99f627c5a4ce0d",
+          "target_bytes": 1032,
+          "adapted": true
+        },
+        "shizukudos/dos16/user/ready.asm": {
+          "source_sha256": "764fcf154308f4e847c30a914595aebf7c25467ce0e87fdac2bd425f834584c9",
+          "target_sha256": "764fcf154308f4e847c30a914595aebf7c25467ce0e87fdac2bd425f834584c9",
+          "target_bytes": 1329,
+          "adapted": false
+        }
+      },
+      "validation": {
+        "status": "ACTUAL_HOST_CHECKS_PASS",
+        "receipt_sha256": "875b60ef0123a6a8892f1d9e9887df8cbcab5ce245d8884c9c66d525089e0703",
+        "host_failure_tests": 4,
+        "checks_returncodes": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "diagnostic_COM": {
+          "bytes": 222,
+          "sha256": "683927ee0d1a57521f389513251a6b1d3185e3f78e7f19b678cdb77dd303ef80"
+        },
+        "source_and_tools_before_after_match": true,
+        "scope": "Four fake-QEMU/QMP failure preservation tests, NASM diagnostic assembly, CLI help, three Python syntax checks, diff whitespace and tool versions; no image producer or guest execution.",
+        "independent_source_review": "CLEAR",
+        "independent_actual_review": "CLEAR; actual four named host tests, seven zero-exit checks, 18 source pins, three tools and raw evidence verified without rerun",
+        "default_ISO_rebuilt": false,
+        "VM_executed": false,
+        "external_downloads_executed": false,
+        "DOS_compatibility_complete": false,
+        "actual_BIOS_startup_and_cold_file_reopen_verified": false,
+        "retained_evidence_closure_sha256": "f2efa338aafd9025e3e64611338929cf1baf44d32ab39f4fa9dc2069dd876bad",
+        "retained_evidence_files": 16,
+        "retained_evidence_bytes": 14492,
+        "inherited_docstring_syntax_warning_preserved": true
+      },
+      "functional_origin_commits": [
+        "6a18ee1f4af4261963fd87e7a759e070630ffc5b",
+        "80748b6cf15f2720983b02097bda1568724e06f7",
+        "823594d0bdb7ce0afc8050e87210b48bd3f41f32"
+      ]
+    }
+  ]
+}

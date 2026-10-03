@@ -249,6 +249,64 @@
         "DOS_compatibility_complete": false
       },
       "initial_origin_commit": "c686bc9ad2fb2bda440a277ef7aeab374fe41381"
+    },
+    {
+      "source_repository": "https://github.com/NiSeullent/ShizukuOS",
+      "source_commit": "497f7607b74baea987ccd201acb217bcc9f07068",
+      "standalone_preimage_commit": "e8870626732bc8bd1cb49ef5362e0d2eca8868ed",
+      "standalone_core_commit": "13abba0e834793b088fda0f2fab3ca3efa897baa",
+      "behavior": "Portable Core IPC representable aligned geometry, domain-owned pools and single private frame snapshot",
+      "adaptation": "Exact two-file source port; existing ABI 1.1 wire structures, standalone DOS-only defaults, optional DOS16 --user-shell, Windows/CSM/GUI research boundaries and initial source-origin record unchanged. No new GUI, installer, application or website import.",
+      "files": {
+        "shizukudos/abi/shz_ipc.h": {
+          "source_sha256": "17c19bcf8295338c02cbcdb83e3ad4c0618e28f78d62ec3568d1ae50b10a2031",
+          "target_sha256": "17c19bcf8295338c02cbcdb83e3ad4c0618e28f78d62ec3568d1ae50b10a2031",
+          "preimage_sha256": "892e00099aad4d1c05cac2555ce6db7f95710ab41e544380afadf17c6ce6202c",
+          "target_bytes": 31126,
+          "adapted": false
+        },
+        "shizukudos/abi/test_abi.c": {
+          "source_sha256": "d80f7128f512fdafb9e77db44c3060a91ff6dda0aa721ddab6cff2bd52447053",
+          "target_sha256": "d80f7128f512fdafb9e77db44c3060a91ff6dda0aa721ddab6cff2bd52447053",
+          "preimage_sha256": "f0f8e79f7fb40586b7fc862c1edcf1c46b9ef64f46b7f75a1e52bbd0888b7770",
+          "target_bytes": 44934,
+          "adapted": false
+        }
+      },
+      "validation": {
+        "status": "ACTUAL_CORE_COMPONENT_CHECKS_PASS",
+        "existing_runner": "python3 -Bu shizukudos/abi/test_abi.py",
+        "exit_code": 0,
+        "elapsed_seconds": 29.606,
+        "full_runner_timed_out": false,
+        "GCC_checks": 3665554,
+        "Clang_ASan_UBSan_checks": 3665540,
+        "Clang_TSan_checks": 3665540,
+        "freestanding_header_compile": [
+          "32-bit GCC",
+          "64-bit GCC/Clang",
+          "i686 MinGW"
+        ],
+        "wire_ABI": "1.1",
+        "wire_sizes": {
+          "message": 64,
+          "ring": 192,
+          "channel": 128,
+          "bootinfo": 472
+        },
+        "independent_Python_wire_roundtrip": true,
+        "C_Python_frame_verdicts": 6000,
+        "actual_production_TU_compiled": [
+          "shizukudos/kernel32/ipc.c",
+          "shizukudos/kernel64/subsys64.c"
+        ],
+        "existing_production_flags_used": true,
+        "VM_executed": false,
+        "default_ISO_rebuilt": false,
+        "DOS_compatibility_complete": false,
+        "ShizukuOS_feature_completion": false
+      },
+      "source_commit_visibility": "Reviewed local source pin; public parent intake may use a different commit ID. Exact Core file hashes identify the imported source."
     }
   ]
 }

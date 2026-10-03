@@ -1,50 +1,56 @@
-# ShizukuDOS standalone development
+# ShizukuDOS independent DOS / Core development
 
-The user's 2026-10-03 hierarchy is authoritative: ShizukuCore is the common
-kernel, above ShizukuDOS (SZRm), Shizuku32 (SZPrtm), Shizuku64 (SZLm), and
-ShizukuOS (Windows98). ShizukuDOS is a subordinate DOS-compatible component,
-not the parent kernel or a DOS/FreeDOS ceiling on ShizukuCore development.
-The product combines Windows98 appearance/reused code with Shizuku Kernel,
-Shizuku Win32 and Shizuku Win32(x64), using gradual service/source migration.
-ReactOS and Wine are permitted implementation references. Existing source
-paths and offline defaults remain until their actual incremental conversion.
+**ShizukuOS is the root operating-system platform. ShizukuOS Core is its common
+execution base, and ShizukuDOS is a subordinate DOS-compatible component.**
+Historical implementation origins do not define system boundaries. The full
+system definition belongs to the parent [ShizukuOS architecture contract](https://github.com/NiSeullent/ShizukuOS/blob/main/docs/SHIZUKUOS_ARCHITECTURE_CONTRACT.md).
+Do not duplicate that goal specification here.
 
-This repository is an independent source copy, not a submodule of Win98-Modern.
-`SOURCE_ORIGIN.json` identifies the initial source and copied hashes. Preserve
-the original project and its separate Windows ISO release track.
+This independent repository maintains the DOS shell and reviewed portable
+Core services. ShizukuOS's native desktop shell, Slade/Flute/Jade theme system,
+full runtime/application ecosystem, Linux and ShizukuVM product integration,
+installer/product ISO and official website belong to the parent ShizukuOS
+repository. Existing standalone DOS examples and experimental DOS-only ISO
+retain their specific evidence and scope; they do not establish a complete
+ShizukuOS installation. Existing directory names and licensed research sources
+remain until actual incremental conversion; no wholesale mirror or parallel
+implementation is implied by the platform definition.
+
+`SOURCE_ORIGIN.json` records the original independent import and is immutable.
+Preserve historical source and validation records without relabeling their
+scope. Before porting, classify existing code and inspect actual callers,
+providers, build wiring and standalone adaptations. ReactOS and Wine are
+permitted references subject to licensing, provenance and this repository's
+DOS/Core boundary.
 
 Default builds use `python3 -B shizukudos/tools/shz.py build --profile dos-only`.
-They must remain offline and must not require a Windows checkout, Windows
-media, upstream downloads, host boot changes, or client-global configuration.
-Optional external research profiles are explicitly selected and keep source
-pins and licensing separate from the default release.
+They remain offline and do not require the parent checkout, Windows media,
+upstream downloads, host boot changes or client-global configuration. Optional
+FreeDOS/FreeCOM/CSM research profiles are explicit and retain their independent
+source pins/licenses. Preserve the optional BIOS-only `--user-shell` behavior;
+parent Windows/profile build choices must not overwrite it.
 
-Keep generated files under ignored build directories. Do not put private media,
-credentials, VM state, third-party application archives, or host configuration
-into source or release packages. Include complete corresponding source and
-license texts for the programs actually distributed.
+Keep generated files in ignored build directories. Never commit private media,
+credentials, VM state, app archives, local machine configuration or runtime
+coordination notes. Include corresponding source and complete license texts
+for actual distributed components.
 
-Acceptance: `python3 -B shizukudos/tools/shz.py test --suite iso`. Firmware
-layout, actual BIOS execution, and actual UEFI native sample execution are
-different checks. Report their evidence and scope accurately. Run only bounded,
-isolated guests without a NIC; preserve other sessions' guests and source edits.
+## Periodic source updates and acceptance
 
-## Scope and ongoing DOS updates
+Review and port coherent DOS or portable Core changes from ShizukuOS in regular
+exact-path batches. Preserve standalone changes instead of replacing whole
+directories. Record immutable source and target revisions, file hashes,
+adaptations and actual checks in append-only `docs/SOURCE_UPDATES.json`.
+The historical three-BIOS-file sync tool has its own narrower policy; it does
+not grant admission to additional Core/ABI/profile paths.
 
-Treat this repository as the independent ShizukuDOS subsystem/Core development
-source track under that hierarchy. Keep Windows 98 installation, VMM/NT integration, application ports and
-the Windows product ISO in Win98-Modern. Its official distribution site remains
-https://m98.nyase.kr. Preserve existing research history without promoting it
-into the standalone default release.
-
-When a coherent DOS change lands in Win98-Modern, review and port the relevant
-DOS source here too. Commit and push each reviewed batch after its relevant
-tests; do not rely on a one-time source copy. Preserve standalone changes rather
-than overwriting whole directories. Record the source commit, copied/adapted
-file hashes and actual validation in docs/SOURCE_UPDATES.json. Do not rewrite
-SOURCE_ORIGIN.json, which describes the original import.
-
-The optional DOS16 user-shell profile uses pinned FreeDOS/FreeCOM sources and
-retains their licenses. It does not replace the offline native dos-only default
-or establish complete DOS compatibility. Never copy private media, build
-outputs or Windows-specific patches as part of a DOS synchronization.
+Run meaningful existing checks for the actual changed production code. Shared
+IPC work uses `python3 -B shizukudos/abi/test_abi.py` and affected production-unit
+compilation. Full DOS ISO acceptance uses
+`python3 -B shizukudos/tools/shz.py test --suite iso` when a release changes.
+Firmware layout, actual BIOS execution, UEFI sample execution, host models and
+actual ShizukuOS feature acceptance are separate results. Report only checks
+that ran; preserve failures. Run bounded owned guests without a NIC and protect
+other sessions' guests and source edits. Publish reviewed, tested batches
+without force-overwriting foreign remote changes. The parent OS publisher owns
+its main branch, product release and nginx site at https://m98.nyase.kr.

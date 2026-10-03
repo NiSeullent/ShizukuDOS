@@ -1,12 +1,19 @@
-# Reviewed DOS source sync for ShizukuOSCore
+# Reviewed DOS / Core source synchronization
 
-The user requested periodic DOS development commits in this independent repository. ShizukuOSCore may use its own DOS shell; Win98-Modern retains genuine Windows98 as its product frontend. Each repository keeps its own history and acceptance evidence.
+The user requested periodic DOS/Core commits in this independent repository.
+The hierarchy is **ShizukuOS → ShizukuOS Core → ShizukuDOS**. This repository
+maintains the DOS shell and portable Core services; the parent
+[ShizukuOS](https://github.com/NiSeullent/ShizukuOS) repository owns the full
+operating system, native desktop shell/themes/apps, product installer/ISO and
+nginx official website. Each repository preserves its history and the actual
+scope of its evidence. The [parent architecture contract](https://github.com/NiSeullent/ShizukuOS/blob/main/docs/SHIZUKUOS_ARCHITECTURE_CONTRACT.md)
+is the full-system definition; no parallel goal document is added here.
 
-`tools/sync_dos_sources.py` compares a named, immutable public Win98-Modern commit against this repository's last shared source hashes. Its exact initial allowlist is `shizukudos/boot.asm`, `shizukudos/stage2.asm` and `shizukudos/cpu_detect.inc`. `docs/DOS_SOURCE_SYNC.json` records those original copied hashes. `SOURCE_ORIGIN.json` continues to identify the initial import and is never rewritten by sync.
+`tools/sync_dos_sources.py` is the historical three-file BIOS workflow. It compares a named, immutable public commit from its explicitly pinned Win98-Modern origin against this repository's last shared source hashes. Its exact initial allowlist is `shizukudos/boot.asm`, `shizukudos/stage2.asm` and `shizukudos/cpu_detect.inc`. `docs/DOS_SOURCE_SYNC.json` records those original copied hashes. `SOURCE_ORIGIN.json` continues to identify the initial import and is never rewritten by sync.
 
 Every accepted source batch must also append its source revision, copied or adapted file hashes, and actual validation to `docs/SOURCE_UPDATES.json`, as required by `AGENTS.md`. The shared-source ledger does not replace that acceptance history. Existing reviewed optional DOS16 shell batches remain recorded there; this tool's three-path selection does not import or overwrite those files.
 
-The native Core desktop, startup/configuration, Kernel64, ABI, firmware bridge, build tools, drivers, accounts, storage and network development are outside this initial selection. Expanding the selection requires a separate source-owner review, a narrow policy/code change and focused compatibility tests. Directory mirrors, Windows startup/recovery/installer imports, private media, keys, guest images and generated artifacts are outside the workflow. The offline `dos-only` default is unchanged.
+Kernel64, ABI, firmware bridge, build tools, drivers, accounts, storage and network source paths are outside the historical tool's initial selection. A separately reviewed portable Core batch may use exact local Git blobs and an append-only source-update record; it must not bypass or silently widen the BIOS tool policy. Expanding the selection requires a separate source-owner review, a narrow policy/code change and focused compatibility tests. Directory mirrors, Windows startup/recovery/installer imports, private media, keys, guest images and generated artifacts are outside the workflow. The offline `dos-only` default is unchanged.
 
 ## One reviewed source epoch
 
@@ -20,7 +27,14 @@ Repeat this sequence whenever a reviewed shared DOS change becomes ready. This c
 
 ## Commands
 
-The source checkout is an explicit argument and must have the reviewed Win98-Modern origin. Use an existing frozen public commit rather than `HEAD` or a branch name.
+For the historical BIOS tool, the source checkout is explicit and must match
+its reviewed Win98-Modern origin. The current parent source origin is
+NiSeullent/ShizukuOS; the tool intentionally refuses a renamed origin until its
+policy/code receives a separate reviewed update. Do not alter that check merely
+to import Core files. Use immutable committed bytes and exact-path review for
+a separately approved Core batch, retaining standalone adaptations and the
+original source-origin record. For tool use, select an existing frozen public
+commit rather than `HEAD` or a branch name.
 
 ```sh
 python3 -B tools/sync_dos_sources.py --source /path/to/Win98-Modern --commit FULL_PUBLIC_COMMIT --path shizukudos/cpu_detect.inc
@@ -33,3 +47,13 @@ Without `--apply`, the tool prints a deterministic JSON plan and writes no files
 Every Git read also forces `--no-lazy-fetch` and `GIT_NO_LAZY_FETCH=1`. A missing object in a partial/promisor checkout is refused instead of silently downloading it. Use a Git version that supports `--no-lazy-fetch`; an unsupported option refuses the local read. Obtain required public objects separately before running the comparison. The tool does not acquire them or change either checkout's configuration.
 
 The initial workflow commit imports no upstream source. Current boot/stage2 differences need the producer owner's specific review. Focused tests use small local Git repositories and public text fixtures, including a partial clone with a local fake promisor transport. They establish source-selection, conflict, drift, rollback and provenance behavior, with no Windows, Core desktop, physical hardware, VM or ISO execution claim.
+
+
+## Portable IPC batch
+
+The shared IPC hardening batch ports only `shizukudos/abi/shz_ipc.h` and its
+paired `test_abi.c`. It preserves ABI 1.1 wire layouts, independent DOS defaults,
+profile build choices and all original Windows/CSM/GUI boundaries. Actual
+existing ABI host checks and affected K32/K64 unit compilation are recorded in
+`SOURCE_UPDATES.json`; these are Core component checks, not a new VM or ISO
+qualification. Commit publication does not make the full ShizukuOS complete.

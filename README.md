@@ -7,26 +7,27 @@ resembles an early IBM PC. Modern systems offer UEFI, x86-64 Long Mode, and a
 memory map with very different opinions. ShizukuDOS explores what happens when
 DOS is allowed to cross that boundary.
 
-ShizukuDOS is an experimental multi-kernel DOS architecture. Its source contains
-distinct Real Mode, Protected Mode, and Long Mode environments, with explicit
-boot contracts and compatibility boundaries. Extending the execution model
-requires separate kernels, ABIs, firmware bridges, and occasionally a complete
-replacement for the assumptions an old program brought with it. A mode switch
-alone does not make a legacy binary compatible.
+ShizukuDOS is an experimental DOS-compatible subsystem under **ShizukuOS Core**.
+**ShizukuOS is the root operating system**. This independent repository develops
+the DOS shell and reviewed portable Core services, with Real Mode, Protected
+Mode, Long Mode and v8086 execution boundaries. A mode switch alone does not
+make a legacy binary compatible.
 
-This repository is an **independent source copy** of the DOS components from
-[Windows 98 Shizuku's Second Edition / Win98 ShkSE](https://github.com/NiSeullent/Win98-Modern).
-It has its own development history, build entry point, DOS-only ISO, release
-channel, and native 64-bit samples. Building it does not require a Win98 checkout
-or Windows installation media. The original Windows project keeps its own
-source and ISO track. [SOURCE_ORIGIN.json](SOURCE_ORIGIN.json) records the exact
-upstream commit and copied file hashes.
+[ShizukuOS's architecture contract](https://github.com/NiSeullent/ShizukuOS/blob/main/docs/SHIZUKUOS_ARCHITECTURE_CONTRACT.md)
+defines the complete platform. Its executable desktop shell, Slade/Flute/Jade
+themes, native applications, Linux and virtualization integration, product
+installer/ISO and official website are maintained in the parent OS repository.
+This DOS/Core track's existing sample GUI, utilities and experimental DOS-only
+ISO keep their narrower scope; they are not full ShizukuOS feature acceptance.
 
-This repository is maintained as the independent DOS shell and **ShizukuOS
-Core** track. Reviewed DOS changes from Win98-Modern are ported here in regular
-commit batches, preserving this project's own build and source history.
-Windows 98 installation and VMM/NT integration continue in Win98-Modern.
-[Source update records](docs/SOURCE_UPDATES.json) identify each later port.
+This repository has its own history, build entry point and standalone samples.
+Its offline default does not require a parent checkout or Windows media.
+[SOURCE_ORIGIN.json](SOURCE_ORIGIN.json) preserves the initial source import and
+file hashes; historical names do not determine current architecture boundaries.
+Reviewed DOS/Core changes are ported in regular exact-path batches, preserving
+standalone adaptations. [Source update records](docs/SOURCE_UPDATES.json)
+identify the pinned sources and checks actually run. Whole-directory mirrors,
+Windows profile/installer changes and application ports are outside that sync.
 
 ## Build the DOS-only track
 
